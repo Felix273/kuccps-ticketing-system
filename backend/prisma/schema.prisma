@@ -1,0 +1,138 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  name          String
+  username      String   @unique
+  department    String?
+  role          String   @default("staff")
+  ldapSync      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  assignedTickets Ticket[] @relation("AssignedTickets")
+  createdTickets  Ticket[] @relation("CreatedTickets")
+  comments        Comment[]
+  
+  @@index([email])
+  @@index([username])
+}
+
+model Department {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  code      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  tickets   Ticket[]
+}
+
+model Ticket {
+  id                String   @id @default(uuid())
+  ticketNumber      String   @unique
+  subject           String
+  description       String   @db.Text
+  emailContent      String?  @db.Text
+  category          String
+  priority          String   @default("Medium")
+  status            String   @default("Open")
+  
+  requesterEmail    String
+  requesterName     String?
+  departmentId      String?
+  department        Department? @relation(fields: [departmentId], references: [id])
+  
+  assignedToId      String?
+  assignedTo        User?    @relation("AssignedTickets", fields: [assignedToId], references: [id])
+  
+  createdById       String?
+  createdBy         User?    @relation("CreatedTickets", fields: [createdById], references: [id])
+  
+  emailMessageId    String?  @unique
+  
+  responseTime      Int?
+  resolutionTime    Int?
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  resolvedAt        DateTime?
+  closedAt          DateTime?
+  
+  attachments       Attachment[]
+  comments          Comment[]
+  history           TicketHistory[]
+  
+  @@index([ticketNumber])
+  @@index([status])
+  @@index([priority])
+  @@index([requesterEmail])
+  @@index([createdAt])
+}
+
+model Attachment {
+  id          String   @id @default(uuid())
+  ticketId    String
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  
+  filename    String
+  filepath    String
+  mimetype    String
+  size        Int
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([ticketId])
+}
+
+model Comment {
+  id          String   @id @default(uuid())
+  ticketId    String
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  
+  content     String   @db.Text
+  isInternal  Boolean  @default(false)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([ticketId])
+  @@index([userId])
+}
+
+model TicketHistory {
+  id          String   @id @default(uuid())
+  ticketId    String
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  
+  field       String
+  oldValue    String?
+  newValue    String?
+  changedBy   String?
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([ticketId])
+}
+
+model EmailConfig {
+  id                String   @id @default(uuid())
+  provider          String   @default("gmail")
+  email             String   @unique
+  isActive          Boolean  @default(true)
+  lastChecked       DateTime?
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
