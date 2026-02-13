@@ -34,10 +34,13 @@ app.use((req, res, next) => {
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/tickets', ticketRoutes);
+
 app.use('/api/departments', departmentRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/public/tickets', publicTicketRoutes);
+app.use('/api/tickets/public', publicTicketRoutes); // Alias for Google Add-on compatibility
+app.use('/api/tickets', ticketRoutes); // Must come AFTER public routes
 
 // Health check
 app.get('/health', (req, res) => {
