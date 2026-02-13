@@ -1,0 +1,17 @@
+{
+  "name": "KUCCPS IT Support System",
+  "short_name": "KUCCPS Support",
+  "description": "Internal IT Support Ticketing System for KUCCPS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#911414",
+  "icons": [
+    {
+      "src": "/kuccps-logo.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

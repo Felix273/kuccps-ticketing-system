@@ -1,0 +1,50 @@
+{
+  "timeZone": "Africa/Nairobi",
+  "dependencies": {
+    "enabledAdvancedServices": [
+      {
+        "userSymbol": "Gmail",
+        "version": "v1",
+        "serviceId": "gmail"
+      }
+    ]
+  },
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "addOns": {
+    "common": {
+      "name": "KUCCPS IT Support",
+      "logoUrl": "https://your-domain.com/kuccps-logo.png",
+      "layoutProperties": {
+        "primaryColor": "#911414",
+        "secondaryColor": "#d20001"
+      },
+      "homepageTrigger": {
+        "runFunction": "onHomepage"
+      },
+      "universalActions": [
+        {
+          "label": "Submit IT Ticket",
+          "runFunction": "onHomepage"
+        }
+      ]
+    },
+    "gmail": {
+      "contextualTriggers": [
+        {
+          "unconditional": {},
+          "onTriggerFunction": "onGmailOpen"
+        }
+      ],
+      "composeTrigger": {
+        "selectActions": [
+          {
+            "text": "Create IT Ticket",
+            "runFunction": "onComposeOpen"
+          }
+        ],
+        "draftAccess": "NONE"
+      }
+    }
+  }
+}
