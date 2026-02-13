@@ -171,10 +171,14 @@ exports.getTicketById = async (req, res) => {
 // Create ticket
 exports.createTicket = async (req, res) => {
   try {
-    const { subject, description, requesterEmail, departmentId, category, priority } = req.body;
+    console.log('📧 Received email data:', { requesterEmail: req.body.requesterEmail, senderEmail: req.body.senderEmail });
+    const { subject, description, requesterEmail, senderEmail, senderName, departmentId, category, priority } = req.body;
+    
+    // Support both requesterEmail (from web) and senderEmail (from Google Add-on)
+    const email = requesterEmail || senderEmail;
 
     // Validate required fields
-    if (!subject || !description || !requesterEmail) {
+    if (!subject || !description || !email) {
       return res.status(400).json({
         success: false,
         message: 'Subject, description, and requester email are required'
@@ -190,7 +194,7 @@ exports.createTicket = async (req, res) => {
         ticketNumber,
         subject,
         description,
-        requesterEmail,
+        requesterEmail: email,
         departmentId: departmentId || null,
         category: category || 'General Issues',
         priority: priority || 'Medium',
@@ -203,7 +207,7 @@ exports.createTicket = async (req, res) => {
 
     // Send confirmation email
     try {
-      await sendEmail(requesterEmail, 'ticketCreated', ticket);
+      await sendEmail(email, 'ticketCreated', ticket);
     } catch (emailError) {
       console.error('Failed to send email:', emailError);
       // Don't fail the request if email fails

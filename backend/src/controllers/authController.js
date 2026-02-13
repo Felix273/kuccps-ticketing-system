@@ -18,7 +18,7 @@ const generateToken = (user) => {
   );
 };
 
-// Login with username and password (LDAP will be added later)
+// Login with username and password
 exports.login = async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -30,45 +30,22 @@ exports.login = async (req, res) => {
       });
     }
 
-    // For now, demo login (we'll add LDAP later)
-    // Demo credentials: admin/admin or itstaff/itstaff
-    let user;
+    // Find user by username
+    const user = await prisma.user.findUnique({
+      where: { username }
+    });
+
+    if (!user) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid credentials' 
+      });
+    }
+
+    // Verify password with bcrypt
+    const isValidPassword = await bcrypt.compare(password, user.password);
     
-    if (username === 'admin' && password === 'admin') {
-      // Check if admin user exists
-      user = await prisma.user.findUnique({
-        where: { username: 'admin' }
-      });
-
-      // Create admin user if doesn't exist
-      if (!user) {
-        user = await prisma.user.create({
-          data: {
-            username: 'admin',
-            email: 'admin@kuccps.ac.ke',
-            name: 'IT Admin',
-            role: 'admin',
-            department: 'ICT'
-          }
-        });
-      }
-    } else if (username === 'itstaff' && password === 'itstaff') {
-      user = await prisma.user.findUnique({
-        where: { username: 'itstaff' }
-      });
-
-      if (!user) {
-        user = await prisma.user.create({
-          data: {
-            username: 'itstaff',
-            email: 'itstaff@kuccps.ac.ke',
-            name: 'IT Staff Member',
-            role: 'staff',
-            department: 'ICT'
-          }
-        });
-      }
-    } else {
+    if (!isValidPassword) {
       return res.status(401).json({ 
         success: false, 
         message: 'Invalid credentials' 
@@ -77,7 +54,7 @@ exports.login = async (req, res) => {
 
     // Generate token
     const token = generateToken(user);
-
+    
     res.json({
       success: true,
       message: 'Login successful',
@@ -85,8 +62,8 @@ exports.login = async (req, res) => {
       user: {
         id: user.id,
         username: user.username,
-        email: user.email,
         name: user.name,
+        email: user.email,
         role: user.role,
         department: user.department
       }
@@ -95,7 +72,7 @@ exports.login = async (req, res) => {
     console.error('Login error:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Server error during login',
+      message: 'Login failed',
       error: error.message 
     });
   }
