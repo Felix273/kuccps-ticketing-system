@@ -3,6 +3,11 @@ const router = express.Router();
 const ticketController = require('../controllers/ticketController');
 const authMiddleware = require('../middleware/auth');
 
+// Health check endpoint (no auth required) - MUST be before authMiddleware
+router.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // All ticket routes require authentication
 router.use(authMiddleware);
 
