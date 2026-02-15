@@ -185,25 +185,85 @@ exports.createTicket = async (req, res) => {
       });
     }
 
+exports.createTicket = async (req, res) => {
+  try {
+    console.log('📧 Received email data:', { requesterEmail: req.body.requesterEmail, senderEmail: req.body.senderEmail });
+    const { subject, description, requesterEmail, senderEmail, senderName, departmentId, category, priority } = req.body;
+    
+    // Support both requesterEmail (from web) and senderEmail (from Google Add-on)
+    const email = requesterEmail || senderEmail;
+    const name = senderName || null;
+    
+    // Validate required fields
+    if (!subject || !description || !email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Subject, description, and requester email are required'
+      });
+    }
+    
+    // Try to find existing user by email to link the ticket
+    let createdById = null;
+    try {
+      const existingUser = await prisma.user.findUnique({
+        where: { email: email }
+      });
+      if (existingUser) {
+        createdById = existingUser.id;
+        console.log(`✅ Linked ticket to user: ${existingUser.name} (${existingUser.email})`);
+      } else {
+        console.log(`ℹ️ No user found for email: ${email}, ticket will be unlinked`);
+      }
+    } catch (userError) {
+      console.log('Could not find user:', userError.message);
+    }
+    
     // Generate ticket number
     const ticketCount = await prisma.ticket.count();
     const ticketNumber = `TKT-${String(ticketCount + 1).padStart(6, '0')}`;
-
+    
     const ticket = await prisma.ticket.create({
       data: {
         ticketNumber,
         subject,
         description,
         requesterEmail: email,
+        requesterName: name,
+        createdById: createdById,
         departmentId: departmentId || null,
         category: category || 'General Issues',
         priority: priority || 'Medium',
         status: 'Open'
       },
       include: {
-        department: true
+        department: true,
+        createdBy: true
       }
     });
+    
+    // Send confirmation email
+    try {
+      await sendEmail(email, 'ticketCreated', ticket);
+    } catch (emailError) {
+      console.error('Failed to send email:', emailError);
+      // Don't fail the request if email fails
+    }
+    
+    res.status(201).json({
+      success: true,
+      message: 'Ticket created successfully',
+      ticket
+    });
+  } catch (error) {
+    console.error('Create ticket error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create ticket',
+      error: error.message
+    });
+  }
+};
+
 
     // Send confirmation email
     try {
