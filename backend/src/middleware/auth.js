@@ -1,48 +1,49 @@
 const jwt = require('jsonwebtoken');
 
-const authMiddleware = (req, res, next) => {
+const authenticateToken = (req, res, next) => {
   try {
-    // Get token from header
-    const authHeader = req.headers.authorization;
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (!token) {
       return res.status(401).json({ 
         success: false, 
-        message: 'Access denied. No token provided.' 
+        message: 'Access token required' 
       });
     }
 
-    // Extract token
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-
-    // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // Add user info to request
-    req.user = decoded;
-    
-    next();
+    jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production', (err, user) => {
+      if (err) {
+        return res.status(403).json({ 
+          success: false, 
+          message: 'Invalid or expired token' 
+        });
+      }
+      
+      req.user = user;
+      next();
+    });
   } catch (error) {
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Token expired' 
-      });
-    }
-    
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Invalid token' 
-      });
-    }
-
-    res.status(500).json({ 
+    return res.status(500).json({ 
       success: false, 
-      message: 'Server error during authentication',
-      error: error.message 
+      message: 'Authentication error' 
     });
   }
 };
 
-module.exports = authMiddleware;
+const authorizeRoles = (...roles) => {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Insufficient permissions' 
+      });
+    }
+    next();
+  };
+};
+
+module.exports = {
+  authenticateToken,
+  authorizeRoles
+};

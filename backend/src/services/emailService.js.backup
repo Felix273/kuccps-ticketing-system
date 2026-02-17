@@ -1,0 +1,314 @@
+const nodemailer = require('nodemailer');
+const { simpleParser } = require('mailparser');
+const Imap = require('imap');
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
+
+// Create email transporter
+const transporter = nodemailer.createTransport({
+  service: process.env.EMAIL_SERVICE || 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD
+  }
+});
+
+// Email templates
+const emailTemplates = {
+  ticketCreated: (ticket) => ({
+    subject: `[Ticket #${ticket.ticketNumber}] Your support request has been received`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: linear-gradient(135deg, #911414 0%, #d20001 100%); padding: 30px; text-align: center;">
+          <h1 style="color: white; margin: 0;">KUCCPS IT Support</h1>
+        </div>
+        
+        <div style="padding: 30px; background-color: #f9fafb;">
+          <h2 style="color: #111827;">Ticket Created Successfully</h2>
+          
+          <p style="color: #4b5563; font-size: 16px;">
+            Hello,
+          </p>
+          
+          <p style="color: #4b5563; font-size: 16px;">
+            Your support ticket has been created and assigned ticket number <strong>${ticket.ticketNumber}</strong>.
+          </p>
+          
+          <div style="background-color: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #911414;">
+            <h3 style="margin-top: 0; color: #111827;">Ticket Details</h3>
+            <p style="margin: 10px 0;"><strong>Subject:</strong> ${ticket.subject}</p>
+            <p style="margin: 10px 0;"><strong>Priority:</strong> ${ticket.priority}</p>
+            <p style="margin: 10px 0;"><strong>Status:</strong> ${ticket.status}</p>
+            <p style="margin: 10px 0;"><strong>Category:</strong> ${ticket.category}</p>
+          </div>
+          
+          <p style="color: #4b5563; font-size: 16px;">
+            Our IT team will review your request and respond as soon as possible. You will receive email updates when there are changes to your ticket.
+          </p>
+          
+          <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
+            This is an automated message from the KUCCPS IT Helpdesk System.
+          </p>
+        </div>
+      </div>
+    `
+  }),
+
+  ticketAssigned: (ticket, assignedTo) => ({
+    subject: `[Ticket #${ticket.ticketNumber}] Assigned to You`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: linear-gradient(135deg, #911414 0%, #d20001 100%); padding: 30px; text-align: center;">
+          <h1 style="color: white; margin: 0;">KUCCPS IT Support</h1>
+        </div>
+        
+        <div style="padding: 30px; background-color: #f9fafb;">
+          <h2 style="color: #111827;">Ticket Assigned</h2>
+          
+          <p style="color: #4b5563; font-size: 16px;">
+            Hi <strong>${assignedTo.name}</strong>,
+          </p>
+          
+          <p style="color: #4b5563; font-size: 16px;">
+            You have been assigned ticket <strong>${ticket.ticketNumber}</strong>.
+          </p>
+          
+          <div style="background-color: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #911414;">
+            <h3 style="margin-top: 0; color: #111827;">Ticket Details</h3>
+            <p style="margin: 10px 0;"><strong>Subject:</strong> ${ticket.subject}</p>
+            <p style="margin: 10px 0;"><strong>Priority:</strong> ${ticket.priority}</p>
+            <p style="margin: 10px 0;"><strong>Status:</strong> ${ticket.status}</p>
+            <p style="margin: 10px 0;"><strong>Requester:</strong> ${ticket.requesterEmail}</p>
+          </div>
+          
+          <p style="color: #4b5563; font-size: 16px;">
+            Please review the ticket and take appropriate action. Contact the requester if you need additional information.
+          </p>
+          
+          <div style="text-align: center; margin-top: 30px;">
+            <a href="http://localhost:5173" style="display: inline-block; padding: 12px 24px; background-color: #911414; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">
+              View Ticket
+            </a>
+          </div>
+          
+          <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
+            This is an automated message from the KUCCPS IT Helpdesk System.
+          </p>
+        </div>
+      </div>
+    `
+  })
+};
+
+// Send email function
+async function sendEmail({ to, subject, html, ticketNumber }) {
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM,
+      to,
+      subject,
+      html,
+      headers: ticketNumber ? {
+        'X-Ticket-Number': ticketNumber,
+        'References': `<ticket-${ticketNumber}@kuccps.ac.ke>`
+      } : {}
+    });
+    console.log(`✓ Email sent to ${to}: ${subject}`);
+    return { success: true };
+  } catch (error) {
+    console.error('Email send error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Process email and create ticket
+async function processEmail(mail) {
+  try {
+    const from = mail.from.value[0].address;
+    const subject = mail.subject;
+    const body = mail.text || mail.html || '';
+    
+    // Check if this is a reply to an existing ticket
+    const ticketNumberMatch = subject.match(/\[Ticket #(TKT-\d+)\]/);
+    
+    if (ticketNumberMatch) {
+      // This is a reply to an existing ticket - add as comment
+      const ticketNumber = ticketNumberMatch[1];
+      const ticket = await prisma.ticket.findFirst({
+        where: { ticketNumber }
+      });
+      
+      if (ticket) {
+        await prisma.comment.create({
+          data: {
+            ticketId: ticket.id,
+            content: body,
+            userId: null // Email comments don't have a user
+          }
+        });
+        console.log(`✓ Added comment to ticket ${ticketNumber} from ${from}`);
+        return;
+      }
+    }
+    
+    // Create new ticket
+    const ticket = await prisma.ticket.create({
+      data: {
+        subject: subject.substring(0, 255),
+        description: body,
+        requesterEmail: from,
+        status: 'Open',
+        priority: 'Medium',
+        category: 'General Issues',
+        emailMessageId: mail.messageId
+      }
+    });
+    
+    console.log(`✓ Created ticket ${ticket.ticketNumber} from email: ${from}`);
+    
+    // Send confirmation email
+    const emailContent = emailTemplates.ticketCreated(ticket);
+    await sendEmail({
+      to: from,
+      subject: emailContent.subject,
+      html: emailContent.html,
+      ticketNumber: ticket.ticketNumber
+    });
+    
+  } catch (error) {
+    console.error('Error processing email:', error);
+  }
+}
+
+// IMAP connection manager with auto-reconnection
+let imap = null;
+let reconnectTimer = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_DELAY = 60000; // Max 1 minute between reconnects
+
+function createImapConnection() {
+  if (imap) {
+    try {
+      imap.end();
+    } catch (err) {
+      // Ignore errors when closing
+    }
+  }
+
+  imap = new Imap({
+    user: process.env.IMAP_USER,
+    password: process.env.IMAP_PASSWORD,
+    host: process.env.IMAP_HOST,
+    port: parseInt(process.env.IMAP_PORT) || 993,
+    tls: process.env.IMAP_TLS === 'true',
+    tlsOptions: { rejectUnauthorized: false },
+    keepalive: {
+      interval: 10000,
+      idleInterval: 300000,
+      forceNoop: true
+    }
+  });
+
+  function openInbox(cb) {
+    imap.openBox('INBOX', false, cb);
+  }
+
+  imap.once('ready', function() {
+    console.log('✓ Email monitoring started');
+    reconnectAttempts = 0;
+    
+    openInbox(function(err, box) {
+      if (err) {
+        console.error('Error opening inbox:', err);
+        scheduleReconnect();
+        return;
+      }
+      
+      console.log('✓ Connected to inbox');
+      
+      imap.on('mail', function(numNewMsgs) {
+        console.log(`📧 ${numNewMsgs} new email(s) received`);
+        
+        const fetch = imap.seq.fetch(`${box.messages.total}:*`, {
+          bodies: '',
+          struct: true
+        });
+        
+        fetch.on('message', function(msg) {
+          msg.on('body', function(stream) {
+            simpleParser(stream, async (err, mail) => {
+              if (err) {
+                console.error('Error parsing email:', err);
+                return;
+              }
+              await processEmail(mail);
+            });
+          });
+        });
+        
+        fetch.once('error', function(err) {
+          console.error('Fetch error:', err);
+        });
+      });
+    });
+  });
+
+  imap.once('error', function(err) {
+    console.error('IMAP error:', err);
+    scheduleReconnect();
+  });
+
+  imap.once('end', function() {
+    console.log('IMAP connection ended');
+    scheduleReconnect();
+  });
+
+  imap.once('close', function(hadError) {
+    console.log(`IMAP connection closed${hadError ? ' with error' : ''}`);
+    scheduleReconnect();
+  });
+
+  imap.connect();
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+  }
+
+  reconnectAttempts++;
+  
+  const delay = Math.min(
+    5000 * Math.pow(2, reconnectAttempts - 1),
+    MAX_RECONNECT_DELAY
+  );
+
+  console.log(`⏳ Reconnecting to email in ${delay / 1000} seconds (attempt ${reconnectAttempts})...`);
+
+  reconnectTimer = setTimeout(() => {
+    console.log('🔄 Attempting to reconnect to email...');
+    createImapConnection();
+  }, delay);
+}
+
+function startEmailMonitoring() {
+  console.log('Starting email monitoring...');
+  createImapConnection();
+}
+
+process.on('SIGINT', function() {
+  if (imap) {
+    imap.end();
+  }
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+  }
+  process.exit(0);
+});
+
+module.exports = {
+  sendEmail,
+  startEmailMonitoring,
+  emailTemplates
+};
