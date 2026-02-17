@@ -1,36 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const ticketController = require('../controllers/ticketController');
-const authMiddleware = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 
-// Health check endpoint (no auth required) - MUST be before authMiddleware
-router.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
+// Public route - create ticket (for Google Addon)
+router.post('/public/tickets', ticketController.createTicket);
 
-// All ticket routes require authentication
-router.use(authMiddleware);
+// Protected routes - require authentication
+router.get('/tickets', authenticateToken, ticketController.getAllTickets);
+router.get('/tickets/statistics', authenticateToken, ticketController.getStatistics);
+router.get('/tickets/:id', authenticateToken, ticketController.getTicketById);
+router.put('/tickets/:id', authenticateToken, ticketController.updateTicket);
+router.post('/tickets/:id/comments', authenticateToken, ticketController.addComment);
 
-// IMPORTANT: Specific routes MUST come before parameterized routes
-// Get statistics (must be before /:id route)
-router.get('/statistics', ticketController.getStatistics);
-
-// Get all tickets with filters
-router.get('/', ticketController.getAllTickets);
-
-// Get single ticket by ID
-router.get('/:id', ticketController.getTicketById);
-
-// Create new ticket
-router.post('/', ticketController.createTicket);
-
-// Update ticket
-router.put('/:id', ticketController.updateTicket);
-
-// Delete ticket
-router.delete('/:id', ticketController.deleteTicket);
-
-// Add comment to ticket
-router.post('/:id/comments', ticketController.addComment);
+// Note: We don't have a delete function yet, so commenting this out
+// If you need to add delete functionality later, add it to the controller first
+// router.delete('/tickets/:id', authenticateToken, ticketController.deleteTicket);
 
 module.exports = router;
