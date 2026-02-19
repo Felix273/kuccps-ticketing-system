@@ -364,6 +364,45 @@ const App = () => {
   const [departments, setDepartments] = useState([]);
   const [showDepartmentModal, setShowDepartmentModal] = useState(false);
   const [editingDepartment, setEditingDepartment] = useState(null);
+  const [isValidatingAuth, setIsValidatingAuth] = useState(true);
+
+  // Validate authentication on mount
+  React.useEffect(() => {
+    const validateAuth = async () => {
+      const token = localStorage.getItem('token');
+      const storedUser = localStorage.getItem('user');
+      
+      if (token && storedUser) {
+        try {
+          const response = await fetch('http://localhost:5000/api/auth/profile', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          
+          const data = await response.json();
+          
+          if (data.success) {
+            setCurrentUser(data.user);
+            setIsAuthenticated(true);
+            setShowHomePage(false);
+          } else {
+            // Invalid token, clear storage
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+          }
+        } catch (error) {
+          console.error('Auth validation failed:', error);
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        }
+      }
+      
+      setIsValidatingAuth(false);
+    };
+    
+    validateAuth();
+  }, []);
 
   const handleLogin = (user) => {
     setCurrentUser(user);
@@ -521,6 +560,23 @@ const App = () => {
   }, [tickets, filterStatus, filterDepartment, searchQuery]);
 
   const COLORS = ['#911414', '#d20001', '#ac0807', '#f59e0b', '#10b981', '#3b82f6', '#14b8a6', '#f97316'];
+
+  // Show loading while validating authentication
+  if (isValidatingAuth) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-orange-50 flex items-center justify-center">
+        <div className="text-center">
+          <img 
+            src="/kuccps-logo.png" 
+            alt="KUCCPS Logo" 
+            className="h-20 w-auto mb-4 mx-auto animate-pulse"
+          />
+          <div className="w-12 h-12 border-4 border-[#911414] border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="text-gray-600 mt-4">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     if (showHomePage) {

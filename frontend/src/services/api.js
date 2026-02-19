@@ -5,6 +5,21 @@ class ApiService {
     this.baseURL = API_BASE_URL;
   }
 
+  async validateToken() {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        return false;
+      }
+
+      const response = await this.get('/auth/profile');
+      return response.success;
+    } catch (error) {
+      console.error('Token validation failed:', error);
+      return false;
+    }
+  }
+
   getAuthHeader() {
     const token = localStorage.getItem('token');
     return token ? { 'Authorization': `Bearer ${token}` } : {};
@@ -22,7 +37,27 @@ class ApiService {
 
     try {
       const response = await fetch(`${this.baseURL}${endpoint}`, config);
+      
+      // Handle authentication errors
+      if (response.status === 401 || response.status === 403) {
+        // Clear invalid token
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        
+        // Redirect to login if not already on login page
+        if (window.location.pathname !== '/') {
+          window.location.href = '/';
+        }
+        
+        throw new Error('Authentication failed. Please login again.');
+      }
+      
       const data = await response.json();
+      
+      // Check if response indicates failure
+      if (!response.ok && !data.success) {
+        throw new Error(data.message || `Request failed with status ${response.status}`);
+      }
       
       return data;
     } catch (error) {

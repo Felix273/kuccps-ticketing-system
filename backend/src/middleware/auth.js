@@ -12,11 +12,35 @@ const authenticateToken = (req, res, next) => {
       });
     }
 
-    jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production', (err, user) => {
+    // Ensure JWT_SECRET is set
+    if (!process.env.JWT_SECRET) {
+      console.error('CRITICAL: JWT_SECRET is not set in environment variables');
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Server configuration error' 
+      });
+    }
+
+    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
       if (err) {
+        console.error('JWT verification failed:', err.message);
+        
+        // Provide specific error messages
+        if (err.name === 'TokenExpiredError') {
+          return res.status(401).json({ 
+            success: false, 
+            message: 'Token has expired. Please login again.' 
+          });
+        } else if (err.name === 'JsonWebTokenError') {
+          return res.status(403).json({ 
+            success: false, 
+            message: 'Invalid token. Please login again.' 
+          });
+        }
+        
         return res.status(403).json({ 
           success: false, 
-          message: 'Invalid or expired token' 
+          message: 'Authentication failed' 
         });
       }
       
@@ -24,6 +48,7 @@ const authenticateToken = (req, res, next) => {
       next();
     });
   } catch (error) {
+    console.error('Authentication error:', error);
     return res.status(500).json({ 
       success: false, 
       message: 'Authentication error' 
