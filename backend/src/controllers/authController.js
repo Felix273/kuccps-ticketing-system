@@ -1,8 +1,75 @@
 const { PrismaClient } = require('@prisma/client');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const ldap = require('ldapjs');
 
 const prisma = new PrismaClient();
+
+// LDAP Authentication Helper
+const authenticateWithLDAP = (username, password) => {
+  return new Promise((resolve, reject) => {
+    if (!process.env.LDAP_URL || !process.env.LDAP_BASE_DN) {
+      return reject(new Error('LDAP configuration is missing'));
+    }
+
+    const client = ldap.createClient({
+      url: process.env.LDAP_URL,
+      timeout: 5000,
+      connectTimeout: 10000
+    });
+
+    // Construct the user DN
+    const userDN = `${process.env.LDAP_USER_DN_PREFIX || 'cn'}=${username},${process.env.LDAP_BASE_DN}`;
+
+    client.bind(userDN, password, (err) => {
+      if (err) {
+        client.unbind();
+        return reject(new Error('Invalid AD credentials'));
+      }
+
+      // Search for user details
+      const searchOptions = {
+        filter: `(${process.env.LDAP_USER_DN_PREFIX || 'cn'}=${username})`,
+        scope: 'sub',
+        attributes: ['cn', 'mail', 'displayName', 'department', 'memberOf']
+      };
+
+      client.search(process.env.LDAP_BASE_DN, searchOptions, (err, res) => {
+        if (err) {
+          client.unbind();
+          return reject(new Error('LDAP search failed'));
+        }
+
+        let userInfo = null;
+
+        res.on('searchEntry', (entry) => {
+          const attributes = entry.object;
+          userInfo = {
+            username: attributes.cn || username,
+            email: attributes.mail || `${username}@kuccps.ac.ke`,
+            name: attributes.displayName || attributes.cn || username,
+            department: attributes.department || 'ICT',
+            groups: attributes.memberOf || []
+          };
+        });
+
+        res.on('error', (err) => {
+          client.unbind();
+          reject(new Error('LDAP search error'));
+        });
+
+        res.on('end', () => {
+          client.unbind();
+          if (userInfo) {
+            resolve(userInfo);
+          } else {
+            reject(new Error('User not found in AD'));
+          }
+        });
+      });
+    });
+  });
+};
 
 // Generate JWT Token
 const generateToken = (user) => {
@@ -22,7 +89,7 @@ const generateToken = (user) => {
   );
 };
 
-// Login with username and password
+// Login with username and password (AD/LDAP Authentication)
 exports.login = async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -34,25 +101,75 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Find user by username
-    const user = await prisma.user.findUnique({
-      where: { username }
-    });
-
-    if (!user) {
+    // Authenticate against Active Directory
+    let adUserInfo;
+    try {
+      adUserInfo = await authenticateWithLDAP(username, password);
+    } catch (ldapError) {
+      console.error('LDAP authentication failed:', ldapError.message);
       return res.status(401).json({ 
         success: false, 
-        message: 'Invalid credentials' 
+        message: 'Invalid Active Directory credentials' 
       });
     }
 
-    // Verify password with bcrypt
-    const isValidPassword = await bcrypt.compare(password, user.password);
-    
-    if (!isValidPassword) {
-      return res.status(401).json({ 
+    // Check if user's department is ICT
+    const userDepartment = adUserInfo.department?.toLowerCase() || '';
+    if (!userDepartment.includes('ict') && !userDepartment.includes('information')) {
+      return res.status(403).json({ 
         success: false, 
-        message: 'Invalid credentials' 
+        message: 'Access denied. Only ICT department staff can access this system.' 
+      });
+    }
+
+    // Find or create user in local database
+    let user = await prisma.user.findUnique({
+      where: { username: adUserInfo.username },
+      include: { department: true }
+    });
+
+    if (!user) {
+      // Get or create ICT department
+      let ictDepartment = await prisma.department.findFirst({
+        where: { 
+          OR: [
+            { name: { contains: 'ICT', mode: 'insensitive' } },
+            { name: { contains: 'Information', mode: 'insensitive' } }
+          ]
+        }
+      });
+
+      if (!ictDepartment) {
+        ictDepartment = await prisma.department.create({
+          data: {
+            name: 'ICT',
+            code: 'ICT'
+          }
+        });
+      }
+
+      // Create new user from AD info
+      user = await prisma.user.create({
+        data: {
+          username: adUserInfo.username,
+          email: adUserInfo.email,
+          name: adUserInfo.name,
+          password: await bcrypt.hash(password, 10), // Store hashed password as backup
+          role: 'staff', // Default role for ICT staff
+          departmentId: ictDepartment.id
+        },
+        include: { department: true }
+      });
+    } else {
+      // Update user info from AD
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          email: adUserInfo.email,
+          name: adUserInfo.name,
+          password: await bcrypt.hash(password, 10) // Update password hash
+        },
+        include: { department: true }
       });
     }
 

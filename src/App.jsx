@@ -183,14 +183,17 @@ const LoginPage = ({ onLogin, onBack }) => {
 
           <div className="mt-6 pt-6 border-t border-gray-200">
             <p className="text-xs text-center text-gray-500">
-              This system uses LDAP/Active Directory authentication
+              Secured with Active Directory authentication
+            </p>
+            <p className="text-xs text-center text-gray-400 mt-1">
+              ICT Department Access Only
             </p>
           </div>
 
-          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-xs font-semibold text-[#911414] mb-1">Demo Credentials:</p>
-            <p className="text-xs text-[#911414]">Username: <code className="bg-red-100 px-1 rounded">admin</code> / Password: <code className="bg-red-100 px-1 rounded">admin</code></p>
-            <p className="text-xs text-[#911414]">Username: <code className="bg-red-100 px-1 rounded">itstaff</code> / Password: <code className="bg-red-100 px-1 rounded">itstaff</code></p>
+          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-xs font-semibold text-blue-800 mb-1">Authentication:</p>
+            <p className="text-xs text-blue-700">Use your KUCCPS Active Directory credentials to log in.</p>
+            <p className="text-xs text-blue-700 mt-1">Only ICT department staff have access to this system.</p>
           </div>
         </div>
 
