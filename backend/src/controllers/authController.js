@@ -103,14 +103,51 @@ exports.login = async (req, res) => {
 
     // Authenticate against Active Directory
     let adUserInfo;
-    try {
-      adUserInfo = await authenticateWithLDAP(username, password);
-    } catch (ldapError) {
-      console.error('LDAP authentication failed:', ldapError.message);
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Invalid Active Directory credentials' 
+    
+    // Check if LDAP is enabled
+    const useLDAP = process.env.USE_LDAP_AUTH !== 'false';
+    
+    if (useLDAP) {
+      try {
+        adUserInfo = await authenticateWithLDAP(username, password);
+      } catch (ldapError) {
+        console.error('LDAP authentication failed:', ldapError.message);
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Invalid Active Directory credentials' 
+        });
+      }
+    } else {
+      // Fallback to local authentication for development
+      const user = await prisma.user.findUnique({
+        where: { username },
+        include: { department: true }
       });
+
+      if (!user) {
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Invalid credentials' 
+        });
+      }
+
+      const isValidPassword = await bcrypt.compare(password, user.password);
+      
+      if (!isValidPassword) {
+        return res.status(401).json({ 
+          success: false, 
+          message: 'Invalid credentials' 
+        });
+      }
+
+      // Mock AD user info from local user
+      adUserInfo = {
+        username: user.username,
+        email: user.email,
+        name: user.name,
+        department: user.department?.name || 'ICT',
+        groups: []
+      };
     }
 
     // Check if user's department is ICT
