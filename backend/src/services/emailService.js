@@ -1,6 +1,8 @@
 const nodemailer = require('nodemailer');
 const { simpleParser } = require('mailparser');
 const Imap = require('imap');
+const cron = require('node-cron');
+const bcrypt = require('bcryptjs');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
@@ -180,6 +182,20 @@ async function sendEmail(to, template, data) {
   }
 }
 
+// Generate ticket number in TICK-YYYYMM-XXXX format
+async function generateTicketNumber() {
+  const date = new Date();
+  const dateStr = date.getFullYear().toString() +
+    String(date.getMonth() + 1).padStart(2, '0') +
+    String(date.getDate()).padStart(2, '0');
+  const todayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+  const count = await prisma.ticket.count({
+    where: { createdAt: { gte: todayStart, lt: todayEnd } }
+  });
+  return `TICK-${dateStr}-${String(count + 1).padStart(4, '0')}`;
+}
+
 // Parse incoming email and create ticket
 async function processIncomingEmail(emailData) {
   try {
@@ -191,7 +207,7 @@ async function processIncomingEmail(emailData) {
     const body = parsed.text || parsed.html || 'No content';
     
     // Check if this is a reply to existing ticket (look for ticket number in subject)
-    const ticketNumberMatch = subject.match(/\[Ticket #(TKT-\d+)\]/);
+    const ticketNumberMatch = subject.match(/\[Ticket #(TICK-\d{8}-\d{4})\]/);
     
     if (ticketNumberMatch) {
       // This is a reply to an existing ticket
@@ -201,13 +217,37 @@ async function processIncomingEmail(emailData) {
       });
       
       if (ticket) {
+        // Resolve the comment author: find existing user or create a lightweight placeholder
+        let userId = null;
+        try {
+          let commentAuthor = await prisma.user.findUnique({
+            where: { email: from },
+            select: { id: true }
+          });
+          if (!commentAuthor) {
+            commentAuthor = await prisma.user.create({
+              data: {
+                email: from,
+                username: from.split('@')[0],
+                name: from.split('@')[0],
+                password: await bcrypt.hash(Math.random().toString(36), 10),
+                role: 'staff'
+              },
+              select: { id: true }
+            });
+          }
+          userId = commentAuthor.id;
+        } catch (userErr) {
+          console.log('Could not resolve comment author:', userErr.message);
+        }
+
         // Add comment to existing ticket
         await prisma.comment.create({
           data: {
             ticketId: ticket.id,
+            userId: userId,
             content: body,
-            isInternal: false,
-            authorEmail: from
+            isInternal: false
           }
         });
         
@@ -216,9 +256,8 @@ async function processIncomingEmail(emailData) {
       }
     }
     
-    // Create new ticket
-    const ticketCount = await prisma.ticket.count();
-    const newTicketNumber = `TKT-${String(ticketCount + 1).padStart(6, '0')}`;
+    // Create new ticket with same TICK-YYYYMM-XXXX format used by the main app
+    const newTicketNumber = await generateTicketNumber();
     
     const ticket = await prisma.ticket.create({
       data: {
@@ -292,7 +331,35 @@ function startEmailMonitoring() {
   });
 
   imap.connect();
-  
+
+  // Periodic fallback poll using node-cron to catch missed emails
+  const pollInterval = parseInt(process.env.EMAIL_POLL_INTERVAL) || 5;
+  if (cron.validate(`*/${pollInterval} * * * *`)) {
+    cron.schedule(`*/${pollInterval} * * * *`, async () => {
+      try {
+        if (!imap || imap.state !== 'authenticated') return;
+        imap.openBox('INBOX', false, (err, box) => {
+          if (err) {
+            console.error('Cron poll openInbox error:', err.message);
+            return;
+          }
+          const fetch = imap.seq.fetch(`${box.messages.total}:*`, {
+            bodies: '',
+            struct: true
+          });
+          fetch.on('message', function(msg) {
+            msg.on('body', function(stream) {
+              processIncomingEmail(stream);
+            });
+          });
+        });
+      } catch (e) {
+        console.error('Cron poll error:', e.message);
+      }
+    });
+    console.log(`✓ Email polling fallback scheduled every ${pollInterval} minutes`);
+  }
+
   return imap;
 }
 
@@ -300,5 +367,6 @@ module.exports = {
   sendEmail,
   processIncomingEmail,
   startEmailMonitoring,
-  emailTemplates
+  emailTemplates,
+  generateTicketNumber
 };

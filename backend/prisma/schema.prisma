@@ -12,8 +12,9 @@ model User {
   email         String   @unique
   name          String
   username      String   @unique
-  password   String
-  department    String?
+  password      String
+  departmentId  String?
+  department    Department? @relation(fields: [departmentId], references: [id])
   role          String   @default("staff")
   ldapSync      Boolean  @default(false)
   createdAt     DateTime @default(now())
@@ -35,6 +36,7 @@ model Department {
   updatedAt DateTime @updatedAt
   
   tickets   Ticket[]
+  users     User[]
 }
 
 model Ticket {

@@ -6,6 +6,9 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node src/server.js"
   },
+  "prisma": {
+    "seed": "node ./prisma/seed.js"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -24,6 +27,7 @@
     "imap": "^0.8.19",
     "jsonwebtoken": "^9.0.2",
     "ldapauth-fork": "^6.1.0",
+    "ldapjs": "^3.0.7",
     "mailparser": "^3.9.0",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",

@@ -12,7 +12,7 @@ export const UserCard = ({ user, onEdit, onDelete }) => {
   };
 
   // user.department is already a STRING (not an object), so use it directly
-  const departmentName = user.department || null;
+  const departmentName = user.department?.name || (typeof user.department === "string" ? user.department : null);
   const hasDepartment = !!departmentName && departmentName.trim() !== '';
 
   return (

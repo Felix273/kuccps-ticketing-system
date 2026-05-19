@@ -162,12 +162,17 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
       });
     }
 
-    // Response time data (mock for now)
-    const responseTimeData = trendData.map(d => ({
-      date: d.date,
-      avgResponseTime: Math.floor(Math.random() * 20) + 5,
-      target: 24
-    }));
+    // Response time data — backed by real ticket responseTime field
+    const responseTimeData = trendData.map(d => {
+      const dayTicketsWithResponse = tickets.filter(t => {
+        const ticketDate = new Date(t.createdAt);
+        return ticketDate.toDateString() === d.date && t.responseTime != null;
+      });
+      const avgResponseTime = dayTicketsWithResponse.length > 0
+        ? Math.round(dayTicketsWithResponse.reduce((acc, t) => acc + t.responseTime, 0) / dayTicketsWithResponse.length)
+        : 0;
+      return { date: d.date, avgResponseTime, target: 24 };
+    });
 
     // Volume by hour
     const volumeByHour = Array.from({ length: 24 }, (_, i) => {

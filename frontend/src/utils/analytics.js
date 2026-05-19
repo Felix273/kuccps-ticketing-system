@@ -37,8 +37,15 @@ export const calculateAnalytics = (tickets) => {
     });
   }
 
-  const avgResponseTime = tickets.filter(t => t.responseTime).reduce((acc, t) => acc + t.responseTime, 0) / tickets.filter(t => t.responseTime).length || 0;
-  const avgResolutionTime = tickets.filter(t => t.resolutionTime).reduce((acc, t) => acc + t.resolutionTime, 0) / tickets.filter(t => t.resolutionTime).length || 0;
+  const ticketsWithResponse = tickets.filter(t => t.responseTime);
+  const avgResponseTime = ticketsWithResponse.length > 0
+    ? ticketsWithResponse.reduce((acc, t) => acc + t.responseTime, 0) / ticketsWithResponse.length
+    : 0;
+
+  const ticketsWithResolution = tickets.filter(t => t.resolutionTime);
+  const avgResolutionTime = ticketsWithResolution.length > 0
+    ? ticketsWithResolution.reduce((acc, t) => acc + t.resolutionTime, 0) / ticketsWithResolution.length
+    : 0;
 
   return {
     departmentStats,

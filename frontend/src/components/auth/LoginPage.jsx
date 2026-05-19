@@ -154,11 +154,11 @@ export const LoginPage = ({ onLogin, onBack }) => {
             <p className="text-xs font-semibold text-[#911414] mb-1">Demo Credentials:</p>
             <p className="text-xs text-[#911414]">
               Username: <code className="bg-red-100 px-1 rounded">admin</code> / 
-              Password: <code className="bg-red-100 px-1 rounded">admin</code>
+              Password: <code className="bg-red-100 px-1 rounded">admin123</code>
             </p>
             <p className="text-xs text-[#911414]">
               Username: <code className="bg-red-100 px-1 rounded">itstaff</code> / 
-              Password: <code className="bg-red-100 px-1 rounded">itstaff</code>
+              Password: <code className="bg-red-100 px-1 rounded">staff123</code>
             </p>
           </div>
         </div>

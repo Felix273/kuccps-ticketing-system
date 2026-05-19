@@ -63,11 +63,7 @@ exports.createTicket = async (req, res) => {
     });
     console.log('Ticket created:', ticket.ticketNumber);
     try {
-      await sendEmail({
-        to: email,
-        subject: 'Ticket Received: ' + ticket.ticketNumber + ' - ' + subject,
-        html: '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;"><div style="background: #911414; color: white; padding: 20px; text-align: center;"><h2>KUCCPS IT Support</h2><p>Ticket Confirmation</p></div><div style="padding: 20px; background: #f9f9f9;"><p>Your IT support request has been received.</p><div style="background: white; border: 1px solid #ddd; border-radius: 8px; padding: 15px; margin: 15px 0;"><p><strong>Ticket Number:</strong> <span style="color: #911414; font-size: 18px;">' + ticket.ticketNumber + '</span></p><p><strong>Subject:</strong> ' + subject + '</p><p><strong>Category:</strong> ' + ticket.category + '</p><p><strong>Priority:</strong> ' + ticket.priority + '</p><p><strong>Status:</strong> Open</p></div><p>Our IT team will review your ticket shortly.</p></div><div style="text-align: center; padding: 15px; color: #666; font-size: 12px;"><p>KUCCPS ICT Support System</p></div></div>'
-      });
+      await sendEmail(email, 'ticketCreated', ticket);
     } catch (emailError) {
       console.log('Could not send confirmation email:', emailError.message);
     }
@@ -100,7 +96,7 @@ exports.getTicketById = async (req, res) => {
     const { id } = req.params;
     const ticket = await prisma.ticket.findUnique({
       where: { id },
-      include: { department: true, assignedTo: { select: { id: true, name: true, email: true } }, createdBy: { select: { id: true, name: true, email: true } }, comments: { include: { user: { select: { id: true, name: true, email: true, role: true } } }, orderBy: { createdAt: 'asc' } }, attachments: true, history: { include: { user: { select: { id: true, name: true } } }, orderBy: { createdAt: 'desc' } } }
+      include: { department: true, assignedTo: { select: { id: true, name: true, email: true } }, createdBy: { select: { id: true, name: true, email: true } }, comments: { include: { user: { select: { id: true, name: true, email: true, role: true } } }, orderBy: { createdAt: 'asc' } }, attachments: true, history: { orderBy: { createdAt: 'desc' } } }
     });
     if (!ticket) {
       return res.status(404).json({ success: false, message: 'Ticket not found' });
@@ -127,10 +123,10 @@ exports.updateTicket = async (req, res) => {
       updateData.status = status;
       historyEntries.push({ field: 'status', oldValue: existing.status, newValue: status });
       if (status === 'In Progress' && !existing.responseTime) {
-        updateData.responseTime = new Date();
+        updateData.responseTime = Math.floor((new Date() - new Date(existing.createdAt)) / 60000);
       }
       if ((status === 'Resolved' || status === 'Closed') && !existing.resolutionTime) {
-        updateData.resolutionTime = new Date();
+        updateData.resolutionTime = Math.floor((new Date() - new Date(existing.createdAt)) / 60000);
       }
     }
     if (priority && priority !== existing.priority) {
@@ -146,7 +142,7 @@ exports.updateTicket = async (req, res) => {
       historyEntries.push({ field: 'department', oldValue: existing.departmentId, newValue: departmentId });
     }
     if (category) updateData.category = category;
-    if (resolution) updateData.resolution = resolution;
+    // resolution field not in schema, skipping
     const ticket = await prisma.ticket.update({
       where: { id },
       data: updateData,
@@ -155,7 +151,7 @@ exports.updateTicket = async (req, res) => {
     if (historyEntries.length > 0 && userId) {
       await Promise.all(historyEntries.map(entry =>
         prisma.ticketHistory.create({
-          data: { ticketId: id, userId, field: entry.field, oldValue: entry.oldValue || '', newValue: entry.newValue || '' }
+          data: { ticketId: id, changedBy: userId, field: entry.field, oldValue: entry.oldValue || '', newValue: entry.newValue || '' }
         })
       ));
     }

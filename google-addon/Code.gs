@@ -5,8 +5,9 @@
 
 // Configuration
 const CONFIG = {
-  API_URL: 'http://your-backend-url:5000/api/tickets',
-  ICT_EMAIL: 'ict@kuccps.ac.ke',
+  API_URL: 'https://tel-victor-boom-picked.trycloudflare.com/api/public/tickets',
+  ICT_EMAIL: 'it.cloud@kuccps.ac.ke',
+
   BACKEND_API_KEY: 'your-api-key-here' // Optional: for API authentication
 };
 

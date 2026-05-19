@@ -9,7 +9,7 @@ exports.getAllUsers = async (req, res) => {
     
     const where = {};
     if (role) where.role = role;
-    if (department) where.department = department;
+    if (department) where.department = { name: department };
     
     const users = await prisma.user.findMany({
       where,
@@ -88,7 +88,7 @@ exports.createUser = async (req, res) => {
         email,
         name,
         role: role || 'staff',
-        department: departmentName || null
+        departmentId: departmentId || null
       },
       select: {
         id: true,
@@ -151,7 +151,7 @@ exports.updateUser = async (req, res) => {
       ...(email && { email }),
       ...(name && { name }),
       ...(role && { role }),
-      ...(departmentName && { department: departmentName })
+      ...(departmentId && { departmentId: departmentId })
     };
     
     // Hash password if provided
