@@ -13,7 +13,7 @@ export const QuickFilters = ({ onFilterSelect, activeFilter, currentUser }) => {
     },
     {
       id: 'unassigned',
-      label: 'Unassigned',
+      label: 'Unclaimed',
       icon: <UserX className="w-4 h-4" />,
       color: 'bg-gray-100 text-gray-700 border-gray-300 hover:bg-gray-200',
       activeColor: 'bg-gray-600 text-white border-gray-600',

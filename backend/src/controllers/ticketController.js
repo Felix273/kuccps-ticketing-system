@@ -1,8 +1,24 @@
 const { PrismaClient } = require('@prisma/client');
-const { sendEmail } = require('../services/emailService');
+const { sendEmail, sendTicketReply } = require('../services/emailService');
+const { auditLog } = require('../middleware/security');
 const prisma = new PrismaClient();
 
+const VALID_PRIORITIES = new Set(['Low', 'Medium', 'High', 'Critical']);
+const VALID_STATUSES = new Set(['Open', 'In Progress', 'Resolved', 'Closed']);
+
+function cleanText(value, maxLength) {
+  return String(value || '')
+    .replace(/\u0000/g, '')
+    .trim()
+    .slice(0, maxLength);
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ''));
+}
+
 async function generateTicketNumber() {
+  const settings = await prisma.systemSettings.findFirst();
   const date = new Date();
   const dateStr = date.getFullYear().toString() +
     String(date.getMonth() + 1).padStart(2, '0') +
@@ -12,29 +28,57 @@ async function generateTicketNumber() {
   const count = await prisma.ticket.count({
     where: { createdAt: { gte: todayStart, lt: todayEnd } }
   });
-  return `TICK-${dateStr}-${String(count + 1).padStart(4, '0')}`;
+
+  // Use dynamic prefix from settings
+  const prefix = settings ? settings.ticketNumberPrefix : 'TICK';
+  return `${prefix}-${dateStr}-${String(count + 1).padStart(4, '0')}`;
+}
+
+async function findMatchingSlaPolicy({ priority, category, departmentId }) {
+  return prisma.slaPolicy.findFirst({
+    where: {
+      isActive: true,
+      AND: [
+        { OR: [{ priority }, { priority: null }] },
+        { OR: [{ category }, { category: null }] },
+        { OR: [{ departmentId }, { departmentId: null }] }
+      ]
+    },
+    orderBy: [
+      { departmentId: 'desc' },
+      { category: 'desc' },
+      { priority: 'desc' }
+    ]
+  });
 }
 
 exports.createTicket = async (req, res) => {
   try {
-    console.log('Received ticket data:', { requesterEmail: req.body.requesterEmail, senderEmail: req.body.senderEmail });
     const { subject, description, requesterEmail, senderEmail, senderName, departmentId, category, priority } = req.body;
-    const email = requesterEmail || senderEmail;
-    const name = senderName || null;
+    const email = cleanText(requesterEmail || senderEmail, 254).toLowerCase();
+    const name = senderName ? cleanText(senderName, 160) : null;
+    const safeSubject = cleanText(subject, 255);
+    const safeDescription = cleanText(description, 10000);
     if (!subject || !description || !email) {
       return res.status(400).json({ success: false, message: 'Subject, description, and requester email are required' });
+    }
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ success: false, message: 'A valid requester email is required' });
+    }
+    if (safeSubject.length < 3 || safeDescription.length < 5) {
+      return res.status(400).json({ success: false, message: 'Ticket subject or description is too short' });
+    }
+    if (priority && !VALID_PRIORITIES.has(priority)) {
+      return res.status(400).json({ success: false, message: 'Invalid priority' });
     }
     let createdById = null;
     try {
       const existingUser = await prisma.user.findUnique({ where: { email: email } });
       if (existingUser) {
         createdById = existingUser.id;
-        console.log('Linked ticket to user:', existingUser.name, existingUser.email);
-      } else {
-        console.log('No user found for email:', email);
       }
     } catch (userError) {
-      console.log('Could not find user:', userError.message);
+      auditLog('ticket.user_lookup_failed', { requestId: req.id, error: userError.message });
     }
     let resolvedDepartmentId = departmentId || null;
     if (!resolvedDepartmentId && email) {
@@ -42,30 +86,50 @@ exports.createTicket = async (req, res) => {
         const departments = await prisma.department.findMany();
         resolvedDepartmentId = departments.length > 0 ? departments[0].id : null;
       } catch (deptError) {
-        console.log('Could not resolve department:', deptError.message);
+        auditLog('ticket.department_lookup_failed', { requestId: req.id, error: deptError.message });
       }
     }
+
+    // Get system settings for defaults
+    const settings = await prisma.systemSettings.findFirst();
     const ticketNumber = await generateTicketNumber();
+    const resolvedPriority = priority || (settings ? settings.defaultPriority : 'Medium');
+    const resolvedCategory = category || (settings ? settings.defaultCategory : 'General Issues');
+    const slaPolicy = await findMatchingSlaPolicy({
+      priority: resolvedPriority,
+      category: resolvedCategory,
+      departmentId: resolvedDepartmentId
+    });
+    const slaDueAt = slaPolicy
+      ? new Date(Date.now() + slaPolicy.resolutionMinutes * 60 * 1000)
+      : null;
     const ticket = await prisma.ticket.create({
       data: {
         ticketNumber,
-        subject,
-        description,
+        subject: safeSubject,
+        description: safeDescription,
         requesterEmail: email,
         requesterName: name,
-        category: category || 'General Issues',
-        priority: priority || 'Medium',
-        status: 'Open',
+        category: resolvedCategory,
+        priority: resolvedPriority,
+        status: settings ? (settings.defaultStatus || 'Open') : 'Open',
         departmentId: resolvedDepartmentId,
-        createdById: createdById
+        createdById: createdById,
+        slaDueAt
       },
       include: { department: true, assignedTo: true, createdBy: true }
     });
-    console.log('Ticket created:', ticket.ticketNumber);
+    auditLog('ticket.created', { requestId: req.id, ticketNumber: ticket.ticketNumber, email });
     try {
-      await sendEmail(email, 'ticketCreated', ticket);
+      const emailResult = await sendEmail(email, 'ticketCreated', ticket);
+      if (emailResult.success && emailResult.messageId) {
+        await prisma.ticket.update({
+          where: { id: ticket.id },
+          data: { emailMessageId: emailResult.messageId }
+        });
+      }
     } catch (emailError) {
-      console.log('Could not send confirmation email:', emailError.message);
+      auditLog('ticket.confirmation_email_failed', { requestId: req.id, ticketNumber: ticket.ticketNumber, error: emailError.message });
     }
     return res.status(201).json({
       success: true,
@@ -73,8 +137,8 @@ exports.createTicket = async (req, res) => {
       ticket: { id: ticket.id, ticketNumber: ticket.ticketNumber, subject: ticket.subject, status: ticket.status, priority: ticket.priority, category: ticket.category, createdAt: ticket.createdAt }
     });
   } catch (error) {
-    console.error('Error creating ticket:', error);
-    return res.status(500).json({ success: false, message: 'Failed to create ticket', error: error.message });
+    console.error('Error creating ticket:', { requestId: req.id, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to create ticket' });
   }
 };
 
@@ -112,6 +176,12 @@ exports.updateTicket = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, priority, assignedToId, departmentId, category, resolution } = req.body;
+    if (status && !VALID_STATUSES.has(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid ticket status' });
+    }
+    if (priority && !VALID_PRIORITIES.has(priority)) {
+      return res.status(400).json({ success: false, message: 'Invalid ticket priority' });
+    }
     const userId = req.user?.id;
     const existing = await prisma.ticket.findUnique({ where: { id } });
     if (!existing) {
@@ -128,6 +198,17 @@ exports.updateTicket = async (req, res) => {
       if ((status === 'Resolved' || status === 'Closed') && !existing.resolutionTime) {
         updateData.resolutionTime = Math.floor((new Date() - new Date(existing.createdAt)) / 60000);
       }
+      if (status === 'Resolved') {
+        updateData.resolvedAt = new Date();
+      }
+      if (status === 'Closed') {
+        updateData.closedAt = new Date();
+        if (!existing.resolvedAt) updateData.resolvedAt = new Date();
+      }
+      if (status === 'Open' || status === 'In Progress') {
+        updateData.resolvedAt = null;
+        updateData.closedAt = null;
+      }
     }
     if (priority && priority !== existing.priority) {
       updateData.priority = priority;
@@ -142,6 +223,20 @@ exports.updateTicket = async (req, res) => {
       historyEntries.push({ field: 'department', oldValue: existing.departmentId, newValue: departmentId });
     }
     if (category) updateData.category = category;
+    if ((priority && priority !== existing.priority) || (category && category !== existing.category) || (departmentId && departmentId !== existing.departmentId)) {
+      const slaPolicy = await findMatchingSlaPolicy({
+        priority: updateData.priority || existing.priority,
+        category: updateData.category || existing.category,
+        departmentId: updateData.departmentId || existing.departmentId
+      });
+      if (slaPolicy && !['Resolved', 'Closed'].includes(updateData.status || existing.status)) {
+        updateData.slaDueAt = new Date(new Date(existing.createdAt).getTime() + slaPolicy.resolutionMinutes * 60 * 1000);
+      }
+    }
+    if (updateData.slaDueAt || existing.slaDueAt) {
+      const dueAt = updateData.slaDueAt || existing.slaDueAt;
+      updateData.slaBreached = !['Resolved', 'Closed'].includes(updateData.status || existing.status) && new Date() > new Date(dueAt);
+    }
     // resolution field not in schema, skipping
     const ticket = await prisma.ticket.update({
       where: { id },
@@ -155,6 +250,20 @@ exports.updateTicket = async (req, res) => {
         })
       ));
     }
+    if (status && status !== existing.status) {
+      const templateType = status === 'Resolved' ? 'ticketResolved' : 'ticketUpdated';
+      await sendEmail(ticket.requesterEmail, templateType, {
+        ...ticket,
+        emailMessageId: existing.emailMessageId,
+        resolutionComment: resolution || ''
+      });
+    } else if (assignedToId !== undefined && assignedToId !== existing.assignedToId) {
+      await sendEmail(ticket.requesterEmail, 'ticketUpdated', {
+        ...ticket,
+        emailMessageId: existing.emailMessageId,
+        comment: `Your ticket has been claimed by ${ticket.assignedTo?.name || 'a support agent'}.`
+      });
+    }
     return res.json({ success: true, ticket });
   } catch (error) {
     console.error('Error updating ticket:', error);
@@ -167,17 +276,67 @@ exports.addComment = async (req, res) => {
     const { id } = req.params;
     const { content, isInternal } = req.body;
     const userId = req.user?.id;
-    if (!content) {
+    const safeContent = cleanText(content, 10000);
+    if (!safeContent) {
       return res.status(400).json({ success: false, message: 'Comment content is required' });
     }
     const comment = await prisma.comment.create({
-      data: { ticketId: id, userId, content, isInternal: isInternal || false },
+      data: { ticketId: id, userId: userId, content: safeContent, isInternal: isInternal || false },
       include: { user: { select: { id: true, name: true, email: true, role: true } } }
     });
+    const ticket = await prisma.ticket.findUnique({
+      where: { id },
+      include: { assignedTo: { select: { id: true, name: true, email: true } } }
+    });
+    if (ticket && !comment.isInternal) {
+      const emailResult = await sendTicketReply(ticket, safeContent);
+      if (!ticket.emailMessageId && emailResult.success && emailResult.messageId) {
+        await prisma.ticket.update({
+          where: { id },
+          data: { emailMessageId: emailResult.messageId }
+        });
+      }
+    }
     return res.status(201).json({ success: true, comment });
   } catch (error) {
     console.error('Error adding comment:', error);
     return res.status(500).json({ success: false, message: 'Failed to add comment' });
+  }
+};
+
+exports.addAttachment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Attachment file is required' });
+    }
+    const ticket = await prisma.ticket.findUnique({ where: { id } });
+    if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found' });
+
+    const attachment = await prisma.attachment.create({
+      data: {
+        ticketId: id,
+        filename: req.file.originalname,
+        filepath: req.file.path,
+        mimetype: req.file.mimetype,
+        size: req.file.size
+      }
+    });
+
+    await prisma.ticketHistory.create({
+      data: {
+        ticketId: id,
+        field: 'attachment',
+        oldValue: '',
+        newValue: req.file.originalname,
+        changedBy: req.user?.id || ''
+      }
+    });
+
+    res.status(201).json({ success: true, attachment });
+  } catch (error) {
+    console.error('Error adding attachment:', error);
+    res.status(500).json({ success: false, message: 'Failed to add attachment' });
   }
 };
 
@@ -191,7 +350,24 @@ exports.getStatistics = async (req, res) => {
       prisma.ticket.count({ where: { status: 'Closed' } }),
       prisma.ticket.count({ where: { priority: 'Critical', status: { notIn: ['Resolved', 'Closed'] } } })
     ]);
-    return res.json({ success: true, statistics: { total, open, inProgress, resolved, closed, critical } });
+    return res.json({
+      success: true,
+      statistics: {
+        total,
+        open,
+        inProgress,
+        resolved,
+        closed,
+        critical,
+        totalTickets: total,
+        openTickets: open,
+        inProgressTickets: inProgress,
+        resolvedTickets: resolved,
+        closedTickets: closed,
+        criticalTickets: critical,
+        assignedTickets: await prisma.ticket.count({ where: { assignedToId: { not: null } } })
+      }
+    });
   } catch (error) {
     console.error('Error fetching statistics:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch statistics' });

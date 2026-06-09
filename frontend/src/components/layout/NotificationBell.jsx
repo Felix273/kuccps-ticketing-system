@@ -228,7 +228,7 @@ export const NotificationBell = ({ onOpenSettings }) => {
               <div className="p-8 text-center">
                 <Bell className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                 <p className="text-gray-500 text-sm font-medium">No notifications yet</p>
-                <p className="text-gray-400 text-xs mt-1">You'll be notified when tickets are assigned</p>
+                <p className="text-gray-400 text-xs mt-1">You'll be notified when tickets are claimed</p>
               </div>
             )}
           </div>

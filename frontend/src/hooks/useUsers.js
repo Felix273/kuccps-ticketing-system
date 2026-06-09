@@ -82,6 +82,20 @@ export const useUsers = (role = null) => {
     }
   }, []);
 
+  const syncFromAd = useCallback(async () => {
+    try {
+      const data = await userService.syncFromAd();
+      if (data.success) {
+        await fetchUsers();
+        return { success: true, count: data.count };
+      }
+      return { success: false, message: data.message };
+    } catch (error) {
+      console.error('Error syncing users from AD:', error);
+      return { success: false, message: 'Failed to sync users from AD' };
+    }
+  }, [fetchUsers]);
+
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
@@ -93,6 +107,7 @@ export const useUsers = (role = null) => {
     refetch: fetchUsers,
     createUser,
     updateUser,
-    deleteUser
+    deleteUser,
+    syncFromAd
   };
 };

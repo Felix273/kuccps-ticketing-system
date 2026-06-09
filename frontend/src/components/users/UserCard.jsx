@@ -73,7 +73,7 @@ export const UserCard = ({ user, onEdit, onDelete }) => {
       {user._count?.assignedTickets > 0 && (
         <div className="mt-4 pt-4 border-t border-gray-100">
           <p className="text-xs text-gray-500">
-            Assigned to <span className="font-semibold text-gray-700">{user._count.assignedTickets}</span> tickets
+            Claimed <span className="font-semibold text-gray-700">{user._count.assignedTickets}</span> tickets
           </p>
         </div>
       )}

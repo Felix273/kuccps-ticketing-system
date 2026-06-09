@@ -2,6 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --brand-primary: #911414;
+  --brand-secondary: #d20001;
+}
+
+body.theme-high-contrast {
+  filter: contrast(1.08);
+}
+
+body.theme-dark {
+  background: #111827;
+  color: #f9fafb;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',

@@ -16,11 +16,13 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
   const [viewingDepartment, setViewingDepartment] = useState(null);
   const [viewingUser, setViewingUser] = useState(null);
   const [reassigningTicket, setReassigningTicket] = useState(null);
+  const [syncingAd, setSyncingAd] = useState(false);
 
   const hookData = useDepartments(!propDepartments);
   const departments = propDepartments || hookData.departments;
   const isLoading = propLoading !== undefined ? propLoading : hookData.isLoading;
   const { createDepartment, updateDepartment, deleteDepartment, fetchDepartments } = hookData;
+  const syncDepartmentsFromAd = hookData.syncFromAd;
 
   const { users } = useUsers();
   const { tickets, fetchTickets } = useTickets(true);
@@ -45,7 +47,7 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
 
   const handleDelete = async (id, ticketCount) => {
     if (ticketCount > 0) {
-      alert(`Cannot delete department with ${ticketCount} tickets. Please reassign or close tickets first.`);
+      alert(`Cannot delete department with ${ticketCount} tickets. Please transfer claims or close tickets first.`);
       return;
     }
 
@@ -83,8 +85,8 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
       }
       return { success: false, message: result.message };
     } catch (error) {
-      console.error('Assignment error:', error);
-      return { success: false, message: 'Failed to assign ticket' };
+      console.error('Claim transfer error:', error);
+      return { success: false, message: 'Failed to transfer ticket claim' };
     }
   };
 
@@ -94,6 +96,18 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
     }
     if (fetchTickets) {
       fetchTickets();
+    }
+  };
+
+  const handleSyncAd = async () => {
+    if (!syncDepartmentsFromAd) return;
+    setSyncingAd(true);
+    const result = await syncDepartmentsFromAd();
+    setSyncingAd(false);
+    if (result.success) {
+      alert(`Synced ${result.count} directorate(s) from Active Directory`);
+    } else {
+      alert(result.message || 'Failed to sync directorates from Active Directory');
     }
   };
 
@@ -132,6 +146,16 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
               >
                 <RefreshCw className="w-5 h-5" />
                 <span>Refresh</span>
+              </button>
+            )}
+            {syncDepartmentsFromAd && (
+              <button
+                onClick={handleSyncAd}
+                disabled={syncingAd}
+                className="w-full sm:w-auto px-4 py-3 border-2 border-[#911414] text-[#911414] rounded-lg hover:bg-red-50 flex items-center justify-center gap-2 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className={`w-5 h-5 ${syncingAd ? 'animate-spin' : ''}`} />
+                <span>{syncingAd ? 'Syncing AD...' : 'Sync AD Directorates'}</span>
               </button>
             )}
             <button 

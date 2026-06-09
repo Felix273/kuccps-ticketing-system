@@ -70,6 +70,20 @@ export const useDepartments = (shouldFetch = true) => {
     }
   }, [fetchDepartments]);
 
+  const syncFromAd = useCallback(async () => {
+    try {
+      const data = await departmentService.syncFromAd();
+      if (data.success) {
+        await fetchDepartments();
+        return { success: true, count: data.count };
+      }
+      return { success: false, message: data.message };
+    } catch (error) {
+      console.error('Error syncing directorates from AD:', error);
+      return { success: false, message: 'Failed to sync directorates from AD' };
+    }
+  }, [fetchDepartments]);
+
   useEffect(() => {
     if (shouldFetch) {
       fetchDepartments();
@@ -83,6 +97,7 @@ export const useDepartments = (shouldFetch = true) => {
     fetchDepartments,
     createDepartment,
     updateDepartment,
-    deleteDepartment
+    deleteDepartment,
+    syncFromAd
   };
 };

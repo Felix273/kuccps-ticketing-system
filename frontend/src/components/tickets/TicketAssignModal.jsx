@@ -29,7 +29,7 @@ export const TicketAssignModal = ({ ticket, onClose, onAssign }) => {
 
   const handleAssign = async () => {
     if (!selectedUser) {
-      setError('Please select a user to assign this ticket');
+      setError('Please select a user to claim this ticket');
       return;
     }
 
@@ -40,16 +40,16 @@ export const TicketAssignModal = ({ ticket, onClose, onAssign }) => {
     try {
       const result = await onAssign(selectedUser);
       if (result.success) {
-        setSuccess('Ticket assigned successfully!');
+        setSuccess('Ticket claim transferred successfully!');
         setTimeout(() => {
           onClose();
         }, 1500);
       } else {
-        setError(result.message || 'Failed to assign ticket');
+        setError(result.message || 'Failed to transfer ticket claim');
       }
     } catch (error) {
-      console.error('Assignment error:', error);
-      setError('Failed to assign ticket');
+      console.error('Claim transfer error:', error);
+      setError('Failed to transfer ticket claim');
     } finally {
       setIsAssigning(false);
     }
@@ -61,7 +61,7 @@ export const TicketAssignModal = ({ ticket, onClose, onAssign }) => {
         <div className="bg-gradient-to-r from-[#911414] to-[#d20001] text-white p-6 rounded-t-xl sticky top-0 z-10">
           <div className="flex justify-between items-start">
             <div>
-              <h2 className="text-2xl font-bold">Assign Ticket</h2>
+              <h2 className="text-2xl font-bold">Transfer Claim</h2>
               <p className="text-sm text-white/80 mt-1">{ticket?.ticketNumber}</p>
             </div>
             <button
@@ -97,7 +97,7 @@ export const TicketAssignModal = ({ ticket, onClose, onAssign }) => {
             <p className="text-sm text-gray-600"><span className="font-medium">Status:</span> {ticket?.status}</p>
             {ticket?.assignedTo && (
               <p className="text-sm text-gray-600">
-                <span className="font-medium">Currently Assigned To:</span> {ticket.assignedTo.name}
+                <span className="font-medium">Currently Claimed By:</span> {ticket.assignedTo.name}
               </p>
             )}
           </div>
@@ -135,7 +135,7 @@ export const TicketAssignModal = ({ ticket, onClose, onAssign }) => {
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">
               <User className="inline w-4 h-4 mr-1" />
-              Assign To *
+              Claim By *
             </label>
             {filteredUsers.length > 0 ? (
               <select
@@ -163,12 +163,12 @@ export const TicketAssignModal = ({ ticket, onClose, onAssign }) => {
             )}
           </div>
 
-          {/* Assignment Info */}
+          {/* Claim Info */}
           {selectedUser && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <p className="text-sm text-blue-800">
                 <CheckCircle className="inline w-4 h-4 mr-1" />
-                Ticket will be assigned to {filteredUsers.find(u => u.id === selectedUser)?.name}
+                Ticket will be claimed by {filteredUsers.find(u => u.id === selectedUser)?.name}
               </p>
             </div>
           )}
@@ -180,7 +180,7 @@ export const TicketAssignModal = ({ ticket, onClose, onAssign }) => {
               disabled={isAssigning || !selectedUser}
               className="flex-1 px-6 py-3 bg-gradient-to-r from-[#911414] to-[#d20001] text-white rounded-lg hover:from-[#ac0807] hover:to-[#911414] font-medium transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isAssigning ? 'Assigning...' : 'Assign Ticket'}
+              {isAssigning ? 'Transferring...' : 'Transfer Claim'}
             </button>
             <button
               type="button"

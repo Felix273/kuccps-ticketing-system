@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ticketService } from '../services/ticketService';
 
 export const useStatistics = (shouldFetch = true) => {
@@ -6,7 +6,7 @@ export const useStatistics = (shouldFetch = true) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchStatistics = async () => {
+  const fetchStatistics = useCallback(async () => {
     if (!shouldFetch) return;
     
     setIsLoading(true);
@@ -24,13 +24,13 @@ export const useStatistics = (shouldFetch = true) => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [shouldFetch]);
 
   useEffect(() => {
     if (shouldFetch) {
       fetchStatistics();
     }
-  }, [shouldFetch]);
+  }, [shouldFetch, fetchStatistics]);
 
   return { statistics, isLoading, error, refetch: fetchStatistics };
 };

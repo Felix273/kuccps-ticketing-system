@@ -45,7 +45,7 @@ export const DepartmentDetailModal = ({ department, tickets = [], users = [], on
     inProgress: deptTickets.filter(t => t.status === 'In Progress').length,
     resolved: deptTickets.filter(t => t.status === 'Resolved' || t.status === 'Closed').length,
     critical: deptTickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved').length,
-    unassigned: deptTickets.filter(t => !t.assignedToId).length
+    unclaimed: deptTickets.filter(t => !t.assignedToId).length
   };
 
   const resolutionRate = deptStats.totalTickets > 0 
@@ -109,12 +109,12 @@ export const DepartmentDetailModal = ({ department, tickets = [], users = [], on
             </div>
           )}
 
-          {deptStats.unassigned > 0 && (
+          {deptStats.unclaimed > 0 && (
             <div className="bg-yellow-50 border-l-4 border-yellow-500 p-3 sm:p-4 rounded">
               <div className="flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
                 <p className="text-xs sm:text-sm font-semibold text-yellow-800">
-                  {deptStats.unassigned} unassigned ticket{deptStats.unassigned > 1 ? 's' : ''} in this department
+                  {deptStats.unclaimed} unclaimed ticket{deptStats.unclaimed > 1 ? 's' : ''} in this department
                 </p>
               </div>
             </div>
@@ -254,7 +254,7 @@ export const DepartmentDetailModal = ({ department, tickets = [], users = [], on
                 <Users className="w-12 h-12 sm:w-16 sm:h-16 text-gray-400 mx-auto mb-3 sm:mb-4" />
                 <h3 className="text-base sm:text-lg font-semibold text-gray-700 mb-2">No Staff Members</h3>
                 <p className="text-sm text-gray-500">
-                  No users are assigned to this department yet.
+                  No users are attached to this department yet.
                 </p>
               </div>
             )}

@@ -1,7 +1,7 @@
 import React from 'react';
-import { Home, FileText, Building2, Users, Book } from 'lucide-react';
+import { Home, FileText, Building2, Users, Book, Settings } from 'lucide-react';
 
-export const Navigation = ({ activeTab, setActiveTab }) => {
+export const Navigation = ({ activeTab, setActiveTab, user }) => {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Home },
     { id: 'tickets', label: 'All Tickets', icon: FileText },
@@ -9,6 +9,10 @@ export const Navigation = ({ activeTab, setActiveTab }) => {
     { id: 'users', label: 'Users', icon: Users },
     { id: 'knowledgebase', label: 'Knowledge Base', icon: Book },
   ];
+
+  if (user?.role === 'admin') {
+    navItems.push({ id: 'admin', label: 'Settings', icon: Settings });
+  }
 
   return (
     <nav className="bg-white shadow-sm border-b border-gray-200 sticky top-14 sm:top-16 z-30">

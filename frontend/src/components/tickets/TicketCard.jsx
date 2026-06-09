@@ -1,7 +1,7 @@
 import React from 'react';
-import { Mail, Calendar, User, UserPlus, AlertCircle, Clock, CheckCircle, Eye } from 'lucide-react';
+import { Mail, Calendar, User, Hand, AlertCircle, Clock, CheckCircle, Eye } from 'lucide-react';
 
-export const TicketCard = ({ ticket, onAssign, onViewDetails }) => {
+export const TicketCard = ({ ticket, onClaim, onViewDetails, currentUser }) => {
   const getPriorityColor = (priority) => {
     const colors = {
       Low: 'bg-green-100 text-green-700 border-green-200',
@@ -79,7 +79,7 @@ export const TicketCard = ({ ticket, onAssign, onViewDetails }) => {
           {ticket.assignedTo ? (
             <span className="font-medium text-[#911414] truncate">{ticket.assignedTo.name}</span>
           ) : (
-            <span className="text-gray-400 italic">Unassigned</span>
+            <span className="text-gray-400 italic">Unclaimed</span>
           )}
         </div>
 
@@ -99,11 +99,12 @@ export const TicketCard = ({ ticket, onAssign, onViewDetails }) => {
           View Details
         </button>
         <button
-          onClick={onAssign}
-          className="flex-1 px-4 py-2 bg-gradient-to-r from-[#911414] to-[#d20001] text-white rounded-lg hover:from-[#ac0807] hover:to-[#911414] font-medium transition-all shadow-md flex items-center justify-center gap-2"
+          onClick={onClaim}
+          disabled={ticket.assignedToId === currentUser?.id}
+          className="flex-1 px-4 py-2 bg-gradient-to-r from-[#911414] to-[#d20001] text-white rounded-lg hover:from-[#ac0807] hover:to-[#911414] font-medium transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          <UserPlus className="w-4 h-4" />
-          {ticket.assignedTo ? 'Reassign' : 'Assign'}
+          <Hand className="w-4 h-4" />
+          {ticket.assignedToId === currentUser?.id ? 'Claimed' : ticket.assignedTo ? 'Claim from Agent' : 'Claim'}
         </button>
       </div>
     </div>

@@ -195,9 +195,9 @@ export const AdvancedSearchModal = ({ onClose, onApply, departments, users }) =>
               </div>
             </div>
 
-            {/* Assigned To */}
+            {/* Claimed By */}
             <div className="bg-white rounded-xl p-4 border-2 border-gray-200">
-              <h4 className="font-semibold text-gray-900 mb-3">Assigned To</h4>
+              <h4 className="font-semibold text-gray-900 mb-3">Claimed By</h4>
               <div className="space-y-2 max-h-40 overflow-y-auto">
                 {users.filter(u => u.role !== 'user').map(user => (
                   <label key={user.id} className="flex items-center gap-2 cursor-pointer">

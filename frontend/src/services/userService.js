@@ -16,5 +16,9 @@ export const userService = {
 
   async delete(id) {
     return api.delete(`/users/${id}`);
+  },
+
+  async syncFromAd() {
+    return api.post('/users/sync/ad');
   }
 };

@@ -1,12 +1,34 @@
-import React, { useState } from 'react';
-import { X, Mail, Calendar, User, Clock, AlertCircle, CheckCircle, Tag, Building2, MessageSquare, Send, Paperclip, Check, XCircle, PlayCircle, RotateCcw } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { X, Mail, Calendar, User, Clock, AlertCircle, CheckCircle, Tag, Building2, MessageSquare, Send, Paperclip, Check, XCircle, PlayCircle, RotateCcw, ChevronDown, ChevronRight, ShieldCheck, Sparkles, BookOpen } from 'lucide-react';
 import { ticketService } from '../../services/ticketService';
+import { knowledgeBaseService } from '../../services/knowledgeBaseService';
 
 export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
   const [activeTab, setActiveTab] = useState('details');
   const [replyText, setReplyText] = useState('');
+  const [isInternal, setIsInternal] = useState(false);
+  const [collapsedThreads, setCollapsedThreads] = useState({});
+  const fileInputRef = useRef(null);
   const [isSending, setIsSending] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [suggestions, setSuggestions] = useState(null);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+
+  useEffect(() => {
+    const loadSuggestions = async () => {
+      setSuggestionsLoading(true);
+      try {
+        const response = await knowledgeBaseService.getTicketSuggestions(ticket.id);
+        if (response.success) setSuggestions(response.suggestions);
+      } catch (error) {
+        console.warn('Could not load ticket suggestions:', error.message);
+      } finally {
+        setSuggestionsLoading(false);
+      }
+    };
+    const timer = setTimeout(loadSuggestions, 0);
+    return () => clearTimeout(timer);
+  }, [ticket.id]);
 
   const getPriorityColor = (priority) => {
     const colors = {
@@ -70,11 +92,12 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
     try {
       const result = await ticketService.addComment(ticket.id, {
         content: replyText,
-        userId: null // Will be set by backend from auth token
+        isInternal
       });
       
       if (result.success) {
         setReplyText('');
+        setIsInternal(false);
         alert('Reply sent successfully');
         if (onUpdate) {
           await onUpdate();
@@ -85,6 +108,25 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
       alert('Failed to send reply');
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const handleAttachment = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const result = await ticketService.addAttachment(ticket.id, file);
+      if (result.success) {
+        alert('Attachment uploaded');
+        if (onUpdate) await onUpdate();
+      } else {
+        alert(result.message || 'Failed to upload attachment');
+      }
+    } catch (error) {
+      console.error('Attachment upload failed:', error);
+      alert('Failed to upload attachment');
+    } finally {
+      event.target.value = '';
     }
   };
 
@@ -151,7 +193,6 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
     return actions;
   };
 
-  // Mock email thread - in production this would come from backend
   const emailThread = [
     {
       id: 1,
@@ -164,14 +205,19 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
     },
     ...(ticket.comments || []).map((comment, idx) => ({
       id: idx + 2,
-      type: comment.userId ? 'sent' : 'received',
-      from: comment.userId ? ticket.assignedTo?.email : ticket.requesterEmail,
-      fromName: comment.userId ? ticket.assignedTo?.name : ticket.requesterName || ticket.requesterEmail,
+      type: comment.isInternal ? 'internal' : comment.userId ? 'sent' : 'received',
+      from: comment.user?.email || ticket.requesterEmail,
+      fromName: comment.user?.name || ticket.requesterName || ticket.requesterEmail,
       content: comment.content,
       timestamp: comment.createdAt,
-      isInitial: false
+      isInitial: false,
+      isInternal: comment.isInternal
     }))
   ];
+
+  const toggleThread = (id) => {
+    setCollapsedThreads(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   const statusActions = getStatusActions();
 
@@ -224,8 +270,8 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
             <div className="flex items-center gap-2">
               <User className="w-4 h-4 text-white/80" />
               <div>
-                <p className="text-white/70 text-xs">Assigned To</p>
-                <p className="font-medium truncate">{ticket.assignedTo?.name || 'Unassigned'}</p>
+                <p className="text-white/70 text-xs">Claimed By</p>
+                <p className="font-medium truncate">{ticket.assignedTo?.name || 'Unclaimed'}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -290,6 +336,52 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
                 </div>
               </div>
 
+              <div className="bg-indigo-50 rounded-xl p-6 border-2 border-indigo-200">
+                <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-indigo-700" />
+                  AI Knowledge Suggestions
+                </h3>
+                {suggestionsLoading ? (
+                  <p className="text-sm text-indigo-800">Analyzing ticket against knowledge base and ticket history...</p>
+                ) : suggestions ? (
+                  <div className="space-y-4">
+                    <p className="text-sm text-indigo-900">{suggestions.summary}</p>
+                    <div>
+                      <h4 className="font-semibold text-gray-900 mb-2">Recommended actions</h4>
+                      <ul className="space-y-2">
+                        {suggestions.recommendedActions.map((action, index) => (
+                          <li key={index} className="text-sm text-gray-700 flex gap-2">
+                            <CheckCircle className="w-4 h-4 text-indigo-600 flex-shrink-0 mt-0.5" />
+                            <span>{action}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    {suggestions.articles.length > 0 && (
+                      <div>
+                        <h4 className="font-semibold text-gray-900 mb-2">Related knowledge</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {suggestions.articles.map(article => (
+                            <div key={article.id} className="bg-white rounded-lg border border-indigo-100 p-3">
+                              <div className="flex items-start gap-2">
+                                <BookOpen className="w-4 h-4 text-indigo-600 flex-shrink-0 mt-1" />
+                                <div>
+                                  <p className="font-medium text-gray-900">{article.title}</p>
+                                  <p className="text-xs text-gray-500">{article.category}</p>
+                                  <p className="text-sm text-gray-600 mt-1 line-clamp-3">{article.excerpt}</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-indigo-800">No suggestions available yet. Add more knowledge-base articles to improve recommendations.</p>
+                )}
+              </div>
+
               {/* Additional Info Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Requester Info */}
@@ -312,17 +404,17 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
                   </div>
                 </div>
 
-                {/* Assignment Info */}
+                {/* Claim Info */}
                 <div className="bg-white rounded-xl p-4 border-2 border-gray-200">
                   <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                     <Building2 className="w-4 h-4 text-[#911414]" />
-                    Assignment Details
+                    Claim Details
                   </h4>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Assigned To:</span>
+                      <span className="text-gray-600">Claimed By:</span>
                       <span className="font-medium text-gray-900">
-                        {ticket.assignedTo?.name || 'Unassigned'}
+                        {ticket.assignedTo?.name || 'Unclaimed'}
                       </span>
                     </div>
                     {ticket.department && (
@@ -389,6 +481,23 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
                   </div>
                 )}
               </div>
+
+              {ticket.attachments?.length > 0 && (
+                <div className="bg-white rounded-xl p-4 border-2 border-gray-200">
+                  <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                    <Paperclip className="w-4 h-4 text-[#911414]" />
+                    Attachments
+                  </h4>
+                  <div className="space-y-2">
+                    {ticket.attachments.map(attachment => (
+                      <div key={attachment.id} className="flex justify-between items-center text-sm bg-gray-50 rounded-lg p-3">
+                        <span className="font-medium text-gray-800">{attachment.filename}</span>
+                        <span className="text-gray-500">{Math.round(attachment.size / 1024)} KB</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -400,7 +509,9 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
                   <div
                     key={email.id}
                     className={`rounded-xl p-6 border-2 ${
-                      email.type === 'received'
+                      email.type === 'internal'
+                        ? 'bg-amber-50 border-amber-200 mx-6'
+                        : email.type === 'received'
                         ? 'bg-white border-gray-200 ml-0 mr-12'
                         : 'bg-blue-50 border-blue-200 ml-12 mr-0'
                     }`}
@@ -408,38 +519,60 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                          email.type === 'received'
+                          email.type === 'internal'
+                            ? 'bg-gradient-to-br from-amber-500 to-orange-600'
+                            : email.type === 'received'
                             ? 'bg-gradient-to-br from-gray-400 to-gray-600'
                             : 'bg-gradient-to-br from-[#911414] to-[#d20001]'
                         }`}>
-                          <Mail className="w-5 h-5 text-white" />
+                          {email.type === 'internal'
+                            ? <ShieldCheck className="w-5 h-5 text-white" />
+                            : <Mail className="w-5 h-5 text-white" />}
                         </div>
                         <div>
                           <p className="font-semibold text-gray-900">
                             {email.fromName || email.from}
+                            {email.isInternal && (
+                              <span className="ml-2 px-2 py-1 bg-amber-100 text-amber-800 text-xs rounded">
+                                Internal note
+                              </span>
+                            )}
                           </p>
                           <p className="text-sm text-gray-600">{email.from}</p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-sm text-gray-600">
-                          {new Date(email.timestamp).toLocaleDateString()}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          {new Date(email.timestamp).toLocaleTimeString()}
-                        </p>
+                      <div className="flex items-start gap-2">
+                        <div className="text-right">
+                          <p className="text-sm text-gray-600">
+                            {new Date(email.timestamp).toLocaleDateString()}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {new Date(email.timestamp).toLocaleTimeString()}
+                          </p>
+                        </div>
+                        {!email.isInitial && (
+                          <button
+                            onClick={() => toggleThread(email.id)}
+                            className="p-1 rounded hover:bg-black/5"
+                            title={collapsedThreads[email.id] ? 'Expand message' : 'Collapse message'}
+                          >
+                            {collapsedThreads[email.id] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          </button>
+                        )}
                       </div>
                     </div>
 
-                    {email.isInitial && (
+                    {email.isInitial && !collapsedThreads[email.id] && (
                       <div className="mb-3 pb-3 border-b border-gray-200">
                         <p className="font-semibold text-gray-900">{email.subject}</p>
                       </div>
                     )}
 
-                    <div className="prose prose-sm max-w-none">
-                      <p className="text-gray-700 whitespace-pre-wrap">{email.content}</p>
-                    </div>
+                    {!collapsedThreads[email.id] && (
+                      <div className="prose prose-sm max-w-none">
+                        <p className="text-gray-700 whitespace-pre-wrap">{email.content}</p>
+                      </div>
+                    )}
 
                     {email.isInitial && (
                       <div className="mt-3 pt-3 border-t border-gray-200">
@@ -457,28 +590,48 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
               {ticket.status !== 'Closed' && (
                 <div className="bg-gray-50 rounded-xl p-6 border-2 border-gray-200 sticky bottom-0">
                   <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <Send className="w-5 h-5 text-[#911414]" />
-                    Reply to {ticket.requesterEmail}
+                    {isInternal ? <ShieldCheck className="w-5 h-5 text-amber-600" /> : <Send className="w-5 h-5 text-[#911414]" />}
+                    {isInternal ? 'Internal note' : `Reply to ${ticket.requesterEmail}`}
                   </h4>
                   <textarea
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value)}
-                    placeholder="Type your reply here..."
+                    placeholder={isInternal ? 'Add a private note for agents...' : 'Type your reply here...'}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#911414] focus:border-transparent resize-none"
                     rows={4}
                   />
                   <div className="flex justify-between items-center mt-3">
-                    <button className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg flex items-center gap-2 transition-colors">
-                      <Paperclip className="w-4 h-4" />
-                      Attach Files
-                    </button>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        className="hidden"
+                        onChange={handleAttachment}
+                      />
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg flex items-center gap-2 transition-colors"
+                      >
+                        <Paperclip className="w-4 h-4" />
+                        Attach Files
+                      </button>
+                      <label className="flex items-center gap-2 text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={isInternal}
+                          onChange={(e) => setIsInternal(e.target.checked)}
+                          className="w-4 h-4 text-[#911414] rounded focus:ring-[#911414]"
+                        />
+                        Internal note
+                      </label>
+                    </div>
                     <button
                       onClick={handleSendReply}
                       disabled={!replyText.trim() || isSending}
                       className="px-6 py-2 bg-gradient-to-r from-[#911414] to-[#d20001] text-white rounded-lg hover:from-[#ac0807] hover:to-[#911414] font-medium transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
                       <Send className="w-4 h-4" />
-                      {isSending ? 'Sending...' : 'Send Reply'}
+                      {isSending ? 'Saving...' : isInternal ? 'Save Note' : 'Send Reply'}
                     </button>
                   </div>
                 </div>
@@ -500,7 +653,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
                     color: 'bg-blue-100 text-blue-600'
                   },
                   ...(ticket.assignedTo ? [{
-                    action: `Assigned to ${ticket.assignedTo.name}`,
+                    action: `Claimed by ${ticket.assignedTo.name}`,
                     timestamp: ticket.updatedAt,
                     icon: <User className="w-4 h-4" />,
                     color: 'bg-purple-100 text-purple-600'

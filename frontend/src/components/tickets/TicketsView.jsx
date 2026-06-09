@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Filter, RefreshCw, AlertCircle, Download, Sliders } from 'lucide-react';
 import { TicketCard } from './TicketCard';
-import { TicketAssignModal } from './TicketAssignModal';
 import { TicketDetailModal } from './TicketDetailModal';
 import { QuickFilters } from './QuickFilters';
 import { SavedFilters } from './SavedFilters';
@@ -18,7 +17,6 @@ export const TicketsView = ({ tickets = [], isLoading, error, onRefresh }) => {
   const [filterPriority, setFilterPriority] = useState('all');
   const [filterDepartment, setFilterDepartment] = useState('all');
   const [filterAssignedTo, setFilterAssignedTo] = useState('all');
-  const [assigningTicket, setAssigningTicket] = useState(null);
   const [viewingTicket, setViewingTicket] = useState(null);
   const [activeQuickFilter, setActiveQuickFilter] = useState(null);
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
@@ -186,6 +184,39 @@ export const TicketsView = ({ tickets = [], isLoading, error, onRefresh }) => {
     }
   };
 
+  const handleViewDetails = async (ticket) => {
+    try {
+      const response = await ticketService.getById(ticket.id);
+      setViewingTicket(response.success ? response.ticket : ticket);
+    } catch (error) {
+      console.error('Failed to load ticket details:', error);
+      setViewingTicket(ticket);
+    }
+  };
+
+  const handleClaimTicket = async (ticket) => {
+    if (!currentUser?.id) {
+      alert('Unable to identify current user');
+      return;
+    }
+    const action = ticket.assignedTo
+      ? `claim this ticket from ${ticket.assignedTo.name}?`
+      : 'claim this ticket?';
+    if (!confirm(`Are you sure you want to ${action}`)) return;
+
+    try {
+      const result = await ticketService.assign(ticket.id, currentUser.id);
+      if (result.success) {
+        if (onRefresh) await onRefresh();
+      } else {
+        alert(result.message || 'Failed to claim ticket');
+      }
+    } catch (error) {
+      console.error('Failed to claim ticket:', error);
+      alert('Failed to claim ticket');
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -230,6 +261,7 @@ export const TicketsView = ({ tickets = [], isLoading, error, onRefresh }) => {
       <SavedFilters
         onLoadFilter={handleLoadSavedFilter}
         currentFilters={getCurrentFilters()}
+        currentUser={currentUser}
       />
 
       <div className="bg-white rounded-xl shadow-lg p-6">
@@ -337,8 +369,8 @@ export const TicketsView = ({ tickets = [], isLoading, error, onRefresh }) => {
                 onChange={(e) => setFilterAssignedTo(e.target.value)}
                 className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#911414] focus:border-transparent"
               >
-                <option value="all">All Users</option>
-                <option value="unassigned">Unassigned</option>
+                <option value="all">All Claimants</option>
+                <option value="unassigned">Unclaimed</option>
                 {users.filter(u => u.role !== 'user').map(user => (
                   <option key={user.id} value={user.id}>{user.name}</option>
                 ))}
@@ -376,8 +408,9 @@ export const TicketsView = ({ tickets = [], isLoading, error, onRefresh }) => {
               <TicketCard
                 key={ticket.id}
                 ticket={ticket}
-                onAssign={() => setAssigningTicket(ticket)}
-                onViewDetails={() => setViewingTicket(ticket)}
+                currentUser={currentUser}
+                onClaim={() => handleClaimTicket(ticket)}
+                onViewDetails={() => handleViewDetails(ticket)}
               />
             ))}
           </div>
@@ -401,24 +434,6 @@ export const TicketsView = ({ tickets = [], isLoading, error, onRefresh }) => {
           </div>
         )}
       </div>
-
-      {assigningTicket && (
-        <TicketAssignModal
-          ticket={assigningTicket}
-          onClose={() => setAssigningTicket(null)}
-          onAssign={async (userId) => {
-            try {
-              const result = await ticketService.assign(assigningTicket.id, userId);
-              if (result.success && onRefresh) {
-                onRefresh();
-              }
-              return result;
-            } catch (error) {
-              return { success: false, message: 'Failed to assign ticket' };
-            }
-          }}
-        />
-      )}
 
       {viewingTicket && (
         <TicketDetailModal

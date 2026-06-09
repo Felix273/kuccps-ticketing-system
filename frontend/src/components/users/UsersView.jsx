@@ -9,8 +9,9 @@ export const UsersView = () => {
   const [editingUser, setEditingUser] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterRole, setFilterRole] = useState('all');
+  const [syncingAd, setSyncingAd] = useState(false);
 
-  const { users, isLoading, createUser, updateUser, deleteUser, refetch } = useUsers();
+  const { users, isLoading, createUser, updateUser, deleteUser, refetch, syncFromAd } = useUsers();
 
   const handleAdd = () => {
     setEditingUser(null);
@@ -59,6 +60,17 @@ export const UsersView = () => {
       alert('User deleted successfully!');
     } else {
       alert(result.message || 'Failed to delete user');
+    }
+  };
+
+  const handleSyncAd = async () => {
+    setSyncingAd(true);
+    const result = await syncFromAd();
+    setSyncingAd(false);
+    if (result.success) {
+      alert(`Synced ${result.count} user(s) from Active Directory`);
+    } else {
+      alert(result.message || 'Failed to sync users from Active Directory');
     }
   };
 
@@ -116,6 +128,14 @@ export const UsersView = () => {
             >
               <RefreshCw className="w-5 h-5" />
               Refresh
+            </button>
+            <button
+              onClick={handleSyncAd}
+              disabled={syncingAd}
+              className="px-4 py-3 border border-[#911414] text-[#911414] rounded-lg hover:bg-red-50 flex items-center gap-2 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`w-5 h-5 ${syncingAd ? 'animate-spin' : ''}`} />
+              {syncingAd ? 'Syncing AD...' : 'Sync AD Users'}
             </button>
             <button 
               onClick={handleAdd}

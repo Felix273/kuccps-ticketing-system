@@ -1,47 +1,80 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Bookmark, Trash2, Edit2 } from 'lucide-react';
+import { Save, Bookmark, Trash2, Share2 } from 'lucide-react';
+import { viewService } from '../../services/viewService';
 
-export const SavedFilters = ({ onLoadFilter, currentFilters }) => {
+export const SavedFilters = ({ onLoadFilter, currentFilters, currentUser }) => {
   const [savedFilters, setSavedFilters] = useState([]);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [filterName, setFilterName] = useState('');
+  const [visibility, setVisibility] = useState('private');
+  const [isApiBacked, setIsApiBacked] = useState(false);
+
+  const loadSavedFilters = async () => {
+    try {
+      const response = await viewService.getAll('tickets');
+      if (response.success) {
+        setSavedFilters(response.views || []);
+        setIsApiBacked(true);
+        return;
+      }
+    } catch (error) {
+      console.warn('Saved views API unavailable, falling back to localStorage:', error.message);
+    }
+
+    const saved = localStorage.getItem('ticketFilters');
+    setSavedFilters(saved ? JSON.parse(saved) : []);
+    setIsApiBacked(false);
+  };
 
   useEffect(() => {
-    // Load saved filters from localStorage
-    const saved = localStorage.getItem('ticketFilters');
-    if (saved) {
-      setSavedFilters(JSON.parse(saved));
-    }
+    const timer = setTimeout(loadSavedFilters, 0);
+    return () => clearTimeout(timer);
   }, []);
 
-  const saveFilter = () => {
+  const saveFilter = async () => {
     if (!filterName.trim()) {
       alert('Please enter a filter name');
       return;
     }
 
-    const newFilter = {
-      id: Date.now().toString(),
-      name: filterName,
-      filters: currentFilters,
-      createdAt: new Date().toISOString()
-    };
+    if (isApiBacked) {
+      const response = await viewService.create({
+        name: filterName,
+        entity: 'tickets',
+        filters: currentFilters,
+        visibility
+      });
+      if (response.success) {
+        setSavedFilters(prev => [...prev, response.view]);
+      }
+    } else {
+      const newFilter = {
+        id: Date.now().toString(),
+        name: filterName,
+        filters: currentFilters,
+        createdAt: new Date().toISOString()
+      };
 
-    const updated = [...savedFilters, newFilter];
-    setSavedFilters(updated);
-    localStorage.setItem('ticketFilters', JSON.stringify(updated));
-    
+      const updated = [...savedFilters, newFilter];
+      setSavedFilters(updated);
+      localStorage.setItem('ticketFilters', JSON.stringify(updated));
+    }
+
     setFilterName('');
+    setVisibility('private');
     setShowSaveDialog(false);
     alert('Filter saved successfully!');
   };
 
-  const deleteFilter = (id) => {
+  const deleteFilter = async (id) => {
     if (!confirm('Delete this saved filter?')) return;
-    
+
+    if (isApiBacked) {
+      await viewService.delete(id);
+    }
     const updated = savedFilters.filter(f => f.id !== id);
     setSavedFilters(updated);
-    localStorage.setItem('ticketFilters', JSON.stringify(updated));
+    if (!isApiBacked) localStorage.setItem('ticketFilters', JSON.stringify(updated));
   };
 
   return (
@@ -69,6 +102,17 @@ export const SavedFilters = ({ onLoadFilter, currentFilters }) => {
             onChange={(e) => setFilterName(e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-2 focus:ring-2 focus:ring-[#911414] focus:border-transparent"
           />
+          {currentUser?.role === 'admin' && isApiBacked && (
+            <select
+              value={visibility}
+              onChange={(e) => setVisibility(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-2 focus:ring-2 focus:ring-[#911414] focus:border-transparent"
+            >
+              <option value="private">Private</option>
+              <option value="public">Shared with everyone</option>
+              <option value="role">Shared with my role</option>
+            </select>
+          )}
           <div className="flex gap-2">
             <button
               onClick={saveFilter}
@@ -98,6 +142,12 @@ export const SavedFilters = ({ onLoadFilter, currentFilters }) => {
                 className="flex-1 text-left text-sm font-medium text-gray-700 hover:text-[#911414]"
               >
                 {filter.name}
+                {filter.visibility && filter.visibility !== 'private' && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-xs text-blue-600">
+                    <Share2 className="w-3 h-3" />
+                    {filter.visibility}
+                  </span>
+                )}
               </button>
               <button
                 onClick={() => deleteFilter(filter.id)}

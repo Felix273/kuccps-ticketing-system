@@ -83,8 +83,8 @@ export const NotificationPreferences = () => {
     {
       key: 'emailOnAssignment',
       icon: <Mail className="w-5 h-5" />,
-      title: 'Ticket Assignment',
-      description: 'Get notified when a ticket is assigned to you',
+      title: 'Ticket Claims',
+      description: 'Get notified when a ticket is claimed by you',
       color: 'text-blue-600'
     },
     {
@@ -230,7 +230,7 @@ export const NotificationPreferences = () => {
             <strong>Escalation Alerts:</strong> Sent every 2 hours for high/critical priority tickets that are more than 2 days old.
           </p>
           <p>
-            <strong>Instant Notifications:</strong> Sent immediately when tickets are assigned or status changes occur.
+            <strong>Instant Notifications:</strong> Sent immediately when tickets are claimed or status changes occur.
           </p>
         </div>
       </div>

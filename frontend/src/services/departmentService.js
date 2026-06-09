@@ -15,5 +15,9 @@ export const departmentService = {
 
   async delete(id) {
     return api.delete(`/departments/${String(id)}`);
+  },
+
+  async syncFromAd() {
+    return api.post('/departments/sync/ad');
   }
 };

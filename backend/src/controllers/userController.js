@@ -1,5 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+const adService = require('../services/adService');
 const prisma = new PrismaClient();
 
 // Get all users with optional filtering
@@ -222,6 +223,24 @@ exports.deleteUser = async (req, res) => {
       success: false,
       message: 'Failed to delete user',
       error: error.message
+    });
+  }
+};
+
+exports.syncUsersFromAd = async (req, res) => {
+  try {
+    const result = await adService.syncUsers();
+    res.json({
+      success: true,
+      message: `Synced ${result.count} user(s) from Active Directory`,
+      count: result.count,
+      users: result.users
+    });
+  } catch (error) {
+    console.error('AD user sync error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to sync users from Active Directory'
     });
   }
 };

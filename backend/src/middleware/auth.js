@@ -68,7 +68,12 @@ const authorizeRoles = (...roles) => {
   };
 };
 
+const requireAdmin = authorizeRoles('admin');
+const requireStaffOrAdmin = authorizeRoles('staff', 'admin');
+
 module.exports = {
   authenticateToken,
-  authorizeRoles
+  authorizeRoles,
+  requireAdmin,
+  requireStaffOrAdmin
 };

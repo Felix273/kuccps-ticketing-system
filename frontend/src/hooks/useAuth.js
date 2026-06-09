@@ -1,19 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { authService } from '../services/authService';
 
 export const useAuth = () => {
-  const [currentUser, setCurrentUser] = useState(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const user = authService.getCurrentUser();
-    if (user) {
-      setCurrentUser(user);
-      setIsAuthenticated(true);
-    }
-    setIsLoading(false);
-  }, []);
+  const initialUser = authService.getCurrentUser();
+  const [currentUser, setCurrentUser] = useState(initialUser);
+  const [isAuthenticated, setIsAuthenticated] = useState(Boolean(initialUser));
+  const [isLoading] = useState(false);
 
   const login = async (username, password) => {
     const data = await authService.login(username, password);
@@ -30,5 +22,5 @@ export const useAuth = () => {
     setIsAuthenticated(false);
   };
 
-  return { currentUser, isAuthenticated, isLoading, login, logout };
+  return { currentUser, user: currentUser, isAuthenticated, isLoading, login, logout };
 };

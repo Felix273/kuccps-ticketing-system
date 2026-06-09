@@ -35,5 +35,18 @@ export const ticketService = {
   
   async addComment(ticketId, comment) {
     return api.post(`/tickets/${ticketId}/comments`, comment);
+  },
+
+  async addAttachment(ticketId, file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(`${api.baseURL}/tickets/${ticketId}/attachments`, {
+      method: 'POST',
+      headers: {
+        ...api.getAuthHeader()
+      },
+      body: formData
+    });
+    return response.json();
   }
 };

@@ -1,4 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
+const adService = require('../services/adService');
 const prisma = new PrismaClient();
 
 // Get all departments
@@ -227,6 +228,24 @@ exports.deleteDepartment = async (req, res) => {
       success: false,
       message: 'Failed to delete department',
       error: error.message
+    });
+  }
+};
+
+exports.syncDirectoratesFromAd = async (req, res) => {
+  try {
+    const result = await adService.syncDirectorates();
+    res.json({
+      success: true,
+      message: `Synced ${result.count} directorate(s) from Active Directory`,
+      count: result.count,
+      departments: result.departments
+    });
+  } catch (error) {
+    console.error('AD directorate sync error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to sync directorates from Active Directory'
     });
   }
 };

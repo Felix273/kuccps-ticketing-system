@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const departmentController = require('../controllers/departmentController');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 // All routes require authentication
 router.use(authenticateToken);
@@ -9,16 +9,19 @@ router.use(authenticateToken);
 // Get all departments
 router.get('/', departmentController.getAllDepartments);
 
+// Sync directorates from Active Directory
+router.post('/sync/ad', requireAdmin, departmentController.syncDirectoratesFromAd);
+
 // Get single department
 router.get('/:id', departmentController.getDepartmentById);
 
 // Create department
-router.post('/', departmentController.createDepartment);
+router.post('/', requireAdmin, departmentController.createDepartment);
 
 // Update department
-router.put('/:id', departmentController.updateDepartment);
+router.put('/:id', requireAdmin, departmentController.updateDepartment);
 
 // Delete department
-router.delete('/:id', departmentController.deleteDepartment);
+router.delete('/:id', requireAdmin, departmentController.deleteDepartment);
 
 module.exports = router;

@@ -8,40 +8,61 @@ import { TicketsView } from './components/tickets/TicketsView';
 import { DepartmentsView } from './components/departments/DepartmentsView';
 import { UsersView } from './components/users/UsersView';
 import { KnowledgeBaseView } from './components/knowledgebase/KnowledgeBaseView';
+import AdminPanel from './components/admin/AdminPanel';
 import { authService } from './services/authService';
+import { settingsService } from './services/settingsService';
 import { useTickets } from './hooks/useTickets';
 import { useStatistics } from './hooks/useStatistics';
 
 function App() {
-  const [showHomePage, setShowHomePage] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
+  const initialUser = authService.getCurrentUser();
+  const initialToken = localStorage.getItem('token');
+  const [showHomePage, setShowHomePage] = useState(!(initialUser && initialToken));
+  const [isAuthenticated, setIsAuthenticated] = useState(Boolean(initialUser && initialToken));
+  const [currentUser, setCurrentUser] = useState(initialUser && initialToken ? initialUser : null);
   const [activeTab, setActiveTab] = useState('dashboard');
 
   const { tickets, isLoading: ticketsLoading, error: ticketsError, fetchTickets } = useTickets(isAuthenticated);
   const { statistics, isLoading: statsLoading } = useStatistics(isAuthenticated);
 
   useEffect(() => {
-    const user = authService.getCurrentUser();
-    const token = localStorage.getItem('token');
-    
-    if (user && token) {
-      setCurrentUser(user);
-      setIsAuthenticated(true);
-      setShowHomePage(false);
-    }
+    const applyBranding = async () => {
+      try {
+        const response = await settingsService.getPublicSettings();
+        if (!response.success || !response.settings) return;
+        const settings = response.settings;
+        document.title = settings.organizationName || 'KUCCPS Ticketing';
+        document.documentElement.style.setProperty('--brand-primary', settings.primaryColor || '#911414');
+        document.documentElement.style.setProperty('--brand-secondary', settings.secondaryColor || '#d20001');
+        document.body.classList.toggle('theme-dark', Boolean(settings.darkModeEnabled));
+        document.body.classList.toggle('theme-high-contrast', settings.contrastMode === 'high');
+        if (settings.faviconUrl) {
+          let favicon = document.querySelector('link[rel="icon"]');
+          if (!favicon) {
+            favicon = document.createElement('link');
+            favicon.rel = 'icon';
+            document.head.appendChild(favicon);
+          }
+          favicon.href = settings.faviconUrl;
+        }
+      } catch (error) {
+        console.warn('Unable to apply public branding settings:', error.message);
+      }
+    };
+
+    applyBranding();
   }, []);
 
   const handleLogin = async (username, password) => {
     try {
       const result = await authService.login(username, password);
-      
+
       if (result.success) {
         setCurrentUser(result.user);
         setIsAuthenticated(true);
         return { success: true };
       }
-      
+
       return { success: false, message: result.message || 'Invalid credentials' };
     } catch (error) {
       console.error('Login error:', error);
@@ -63,7 +84,7 @@ function App() {
 
   if (!isAuthenticated && !showHomePage) {
     return (
-      <LoginPage 
+      <LoginPage
         onLogin={handleLogin}
         onBack={() => setShowHomePage(true)}
       />
@@ -73,11 +94,11 @@ function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       <Header currentUser={currentUser} onLogout={handleLogout} setActiveTab={setActiveTab} />
-      <Navigation activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Navigation activeTab={activeTab} setActiveTab={setActiveTab} user={currentUser} />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === 'dashboard' && (
-          <DashboardView 
+          <DashboardView
             tickets={tickets}
             statistics={statistics}
             isLoading={statsLoading}
@@ -85,7 +106,7 @@ function App() {
           />
         )}
         {activeTab === 'tickets' && (
-          <TicketsView 
+          <TicketsView
             tickets={tickets}
             isLoading={ticketsLoading}
             error={ticketsError}
@@ -100,6 +121,9 @@ function App() {
         )}
         {activeTab === 'knowledgebase' && (
           <KnowledgeBaseView />
+        )}
+        {activeTab === 'admin' && (
+          <AdminPanel />
         )}
       </main>
     </div>

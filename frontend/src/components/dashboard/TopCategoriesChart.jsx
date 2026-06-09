@@ -4,18 +4,26 @@ import { TrendingUp } from 'lucide-react';
 
 const COLORS = ['#dc2626', '#ea580c', '#ca8a04', '#16a34a', '#0284c7', '#7c3aed', '#db2777', '#64748b'];
 
-export const TopCategoriesChart = ({ statistics }) => {
-  if (!statistics?.topCategories || statistics.topCategories.length === 0) {
+export const TopCategoriesChart = ({ data = [], statistics }) => {
+  const sourceData = data.length > 0 ? data : statistics?.topCategories || [];
+
+  if (sourceData.length === 0) {
     return null;
   }
 
-  const topCategories = [...statistics.topCategories].sort((a, b) => b.count - a.count);
+  const total = sourceData.reduce((sum, item) => sum + item.count, 0);
+  const topCategories = [...sourceData]
+    .sort((a, b) => b.count - a.count)
+    .map(item => ({
+      ...item,
+      percentage: item.percentage ?? (total > 0 ? Math.round((item.count / total) * 100) : 0)
+    }));
 
   return (
     <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-gray-200">
       <h3 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
         <TrendingUp className="w-6 h-6 text-[#911414]" />
-        Top Issue Categories
+        Category Issues
       </h3>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

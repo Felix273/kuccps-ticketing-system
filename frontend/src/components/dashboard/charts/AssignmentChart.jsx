@@ -5,7 +5,7 @@ const COLORS = ['#ef4444', '#10b981'];
 
 export const AssignmentChart = ({ data }) => (
   <div className="bg-white rounded-xl shadow-lg p-6">
-    <h3 className="text-lg font-semibold text-gray-900 mb-6">Assignment Status</h3>
+    <h3 className="text-lg font-semibold text-gray-900 mb-6">Claim Status</h3>
     <ResponsiveContainer width="100%" height={280}>
       <PieChart>
         <Pie

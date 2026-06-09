@@ -189,7 +189,7 @@ export const UserTicketsDrawer = ({ user, tickets = [], onClose, onReassign }) =
                         onClick={() => onReassign(ticket)}
                         className="px-3 py-1 bg-[#911414] text-white rounded hover:bg-[#ac0807] font-medium transition-colors"
                       >
-                        Reassign
+                        Transfer Claim
                       </button>
                     )}
                   </div>
@@ -200,11 +200,11 @@ export const UserTicketsDrawer = ({ user, tickets = [], onClose, onReassign }) =
             <div className="text-center py-12">
               <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                {userTickets.length === 0 ? 'No Tickets Assigned' : 'No Tickets Match Filters'}
+                {userTickets.length === 0 ? 'No Tickets Claimed' : 'No Tickets Match Filters'}
               </h3>
               <p className="text-gray-500">
                 {userTickets.length === 0 
-                  ? 'This user has no tickets assigned yet.'
+                  ? 'This user has no tickets claimed yet.'
                   : 'Try adjusting your filters to see more tickets.'}
               </p>
             </div>
