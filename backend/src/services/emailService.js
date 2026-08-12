@@ -97,6 +97,7 @@ async function getEmailTemplates() {
 async function createEmailTransporter() {
   const settings = await getSystemSettings();
   const smtpPort = Number(settings?.smtpPort || process.env.SMTP_PORT || process.env.EMAIL_SMTP_PORT || 587);
+  const rejectUnauthorized = String(process.env.SMTP_TLS_REJECT_UNAUTHORIZED || 'true').toLowerCase() !== 'false';
   const smtpSecure = smtpPort === 465
     ? true
     : smtpPort === 587
@@ -112,7 +113,8 @@ async function createEmailTransporter() {
       auth: {
         user: settings.smtpUser,
         pass: settings.smtpPassword
-      }
+      },
+      tls: { rejectUnauthorized }
     });
   } else {
     // Fallback to original Gmail service from env
@@ -121,7 +123,8 @@ async function createEmailTransporter() {
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASSWORD
-      }
+      },
+      tls: { rejectUnauthorized }
     });
   }
 }
@@ -175,6 +178,8 @@ async function sendEmail(to, templateType, data) {
       '{{emailFromName}}': settings.emailFromName || 'KUCCPS IT Support',
       '[SUPPORT_EMAIL]': settings.supportEmail || 'itsupport@kuccps.ac.ke',
       '{{supportEmail}}': settings.supportEmail || 'itsupport@kuccps.ac.ke',
+      '[NOREPLY_EMAIL]': settings.noreplyEmail || settings.supportEmail || 'noreply@kuccps.ac.ke',
+      '{{noreplyEmail}}': settings.noreplyEmail || settings.supportEmail || 'noreply@kuccps.ac.ke',
       '{{primaryColor}}': settings.primaryColor || '#911414',
       '{{secondaryColor}}': settings.secondaryColor || '#d20001'
     };
@@ -203,13 +208,14 @@ async function sendEmail(to, templateType, data) {
 
     const authenticatedSender = settings.smtpUser || process.env.EMAIL_USER;
     const supportAddress = settings.supportEmail || authenticatedSender;
+    const noReplyAddress = settings.noreplyEmail || supportAddress;
     const fromAddress = authenticatedSender || supportAddress;
     const mailOptions = {
       from: `${settings.emailFromName} <${fromAddress}>`,
       to: to,
       subject: subject,
       html: html,
-      ...(supportAddress && supportAddress !== fromAddress ? { replyTo: supportAddress } : {}),
+      ...(noReplyAddress ? { replyTo: noReplyAddress } : {}),
       ...(data.emailMessageId ? {
         inReplyTo: data.emailMessageId,
         references: data.emailMessageId
@@ -357,13 +363,14 @@ async function processIncomingEmail(emailData) {
 
 // Monitor inbox for new emails
 function startEmailMonitoring() {
+  const rejectUnauthorized = String(process.env.IMAP_TLS_REJECT_UNAUTHORIZED || 'true').toLowerCase() !== 'false';
   const imap = new Imap({
     user: process.env.IMAP_USER,
     password: process.env.IMAP_PASSWORD,
     host: process.env.IMAP_HOST,
     port: parseInt(process.env.IMAP_PORT) || 993,
     tls: process.env.IMAP_TLS === 'true',
-    tlsOptions: { rejectUnauthorized: false }
+    tlsOptions: { rejectUnauthorized }
   });
 
   function openInbox(cb) {

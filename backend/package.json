@@ -15,24 +15,22 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@google-cloud/local-auth": "^3.0.1",
     "@prisma/client": "^5.22.0",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
-    "cors": "^2.8.5",
+    "cors": "^2.8.6",
     "csv-parser": "^3.2.0",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "express-validator": "^7.3.1",
-    "googleapis": "^166.0.0",
-    "imap": "^0.8.19",
+    "imap": "^0.8.17",
     "jsonwebtoken": "^9.0.2",
     "ldapauth-fork": "^6.1.0",
     "ldapjs": "^3.0.7",
     "mailparser": "^3.9.0",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
-    "nodemailer": "^7.0.10"
+    "nodemailer": "^9.0.0"
   },
   "devDependencies": {
     "prisma": "^5.22.0"

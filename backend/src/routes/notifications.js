@@ -5,6 +5,7 @@ const { PrismaClient } = require('@prisma/client');
 const { createEmailTransporter, getSystemSettings } = require('../services/emailService');
 
 const prisma = new PrismaClient();
+const dismissedNotificationIds = new Map();
 
 const DEFAULT_PREFERENCES = {
   emailOnAssignment: true,
@@ -34,13 +35,53 @@ async function getOrCreatePreferences(userId) {
   });
 }
 
-// Get notifications for current user (returns empty - notification feature not yet implemented)
+function getDismissedSet(userId) {
+  if (!dismissedNotificationIds.has(userId)) {
+    dismissedNotificationIds.set(userId, new Set());
+  }
+  return dismissedNotificationIds.get(userId);
+}
+
 router.get('/', authenticateToken, async (req, res) => {
   try {
+    const preferences = await getOrCreatePreferences(req.user.id);
+    const overdueTickets = preferences.escalationAlerts
+      ? await prisma.ticket.findMany({
+          where: {
+            status: { in: ['Open', 'In Progress'] },
+            slaDueAt: { lt: new Date() }
+          },
+          take: 10,
+          orderBy: { slaDueAt: 'asc' },
+          select: {
+            id: true,
+            ticketNumber: true,
+            subject: true,
+            priority: true,
+            slaDueAt: true,
+            assignedToId: true
+          }
+        })
+      : [];
+
+    const notifications = overdueTickets
+      .filter(ticket => !ticket.assignedToId || ticket.assignedToId === req.user.id || req.user.role === 'admin')
+      .filter(ticket => !getDismissedSet(req.user.id).has(`overdue-${ticket.id}`))
+      .map(ticket => ({
+        id: `overdue-${ticket.id}`,
+        type: 'escalation',
+        title: `Overdue ticket ${ticket.ticketNumber}`,
+        message: `${ticket.subject} is past its turnaround time.`,
+        priority: ticket.priority,
+        createdAt: ticket.slaDueAt,
+        ticketId: ticket.id
+      }));
+
     res.json({
       success: true,
-      notifications: [],
-      count: 0
+      notifications,
+      count: notifications.length,
+      unreadCount: notifications.length
     });
   } catch (error) {
     console.error('Get notifications error:', error);
@@ -51,6 +92,28 @@ router.get('/', authenticateToken, async (req, res) => {
       count: 0
     });
   }
+});
+
+router.put('/read/all', authenticateToken, async (req, res) => {
+  res.json({
+    success: true,
+    message: 'Notifications marked as read'
+  });
+});
+
+router.put('/:id/read', authenticateToken, async (req, res) => {
+  res.json({
+    success: true,
+    message: 'Notification marked as read'
+  });
+});
+
+router.delete('/:id', authenticateToken, async (req, res) => {
+  getDismissedSet(req.user.id).add(req.params.id);
+  res.json({
+    success: true,
+    message: 'Notification dismissed'
+  });
 });
 
 router.get('/preferences', authenticateToken, async (req, res) => {

@@ -97,7 +97,7 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
     // Department Performance
     const departmentStats = {};
     tickets.forEach(t => {
-      const deptName = t.assignedTo?.department || t.department?.name || 'Unclaimed';
+      const deptName = t.assignedTo?.department?.name || t.department?.name || 'Unclaimed';
       if (!departmentStats[deptName]) {
         departmentStats[deptName] = { 
           department: deptName, 
@@ -269,7 +269,7 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
       <QuickStatsCards tickets={tickets} />
 
       {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
         <StatCard
           icon={Mail}
           title="Total Tickets"
@@ -292,6 +292,14 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
           value={stats.inProgressTickets || 0}
           color="text-purple-600"
           bgColor="bg-white"
+        />
+        <StatCard
+          icon={AlertCircle}
+          title="Overdue"
+          value={stats.overdueTickets || 0}
+          color="text-red-600"
+          bgColor="bg-white"
+          subtitle="Needs escalation"
         />
         <StatCard
           icon={CheckCircle}

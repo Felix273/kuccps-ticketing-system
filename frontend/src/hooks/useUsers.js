@@ -48,7 +48,6 @@ export const useUsers = (role = null) => {
   const updateUser = useCallback(async (id, user) => {
     try {
       const data = await userService.update(id, user);
-      console.log('📦 Full API response:', data);
       
       if (data.success) {
         // Update the user in the list immediately

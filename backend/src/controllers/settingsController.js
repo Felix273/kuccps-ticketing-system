@@ -228,6 +228,7 @@ exports.getPublicSettings = async (req, res) => {
       organizationName: settings.organizationName,
       organizationCode: settings.organizationCode,
       logoUrl: settings.logoUrl,
+      faviconUrl: settings.faviconUrl || '/kuccps-logo.png',
       primaryColor: settings.primaryColor,
       secondaryColor: settings.secondaryColor,
       supportEmail: settings.supportEmail,
@@ -375,7 +376,7 @@ exports.resetEmailTemplatesToDefault = async (req, res) => {
               </p>
 
               <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
-                If you have any questions, please reply to this email with your ticket number in the subject line.
+                Please do not reply to this automated email. Contact ICT directly at {{supportEmail}} if you need to follow up.
               </p>
             </div>
 
@@ -422,7 +423,7 @@ exports.resetEmailTemplatesToDefault = async (req, res) => {
               {{/if}}
 
               <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
-                To respond, simply reply to this email.
+                Please do not reply to this automated email. Contact ICT directly at {{supportEmail}} if you need to follow up.
               </p>
             </div>
 
@@ -468,7 +469,7 @@ exports.resetEmailTemplatesToDefault = async (req, res) => {
               {{/if}}
 
               <p style="color: #4b5563; font-size: 16px;">
-                If you're satisfied with the resolution, no further action is needed. If you need additional assistance, please reply to this email.
+                If you're satisfied with the resolution, no further action is needed. Please do not reply to this automated email. Contact ICT directly at {{supportEmail}} if you need additional assistance.
               </p>
 
               <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">

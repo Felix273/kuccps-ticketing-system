@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const departmentController = require('../controllers/departmentController');
-const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { authenticateToken, requireAdmin, requireStaffOrAdmin } = require('../middleware/auth');
 
 // All routes require authentication
 router.use(authenticateToken);
+router.use(requireStaffOrAdmin);
 
 // Get all departments
 router.get('/', departmentController.getAllDepartments);

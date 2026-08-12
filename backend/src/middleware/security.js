@@ -1,7 +1,4 @@
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-
 const memoryBuckets = new Map();
 
 function requestId(req, res, next) {
@@ -16,6 +13,7 @@ function securityHeaders(req, res, next) {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+  res.setHeader('Cache-Control', 'no-store');
   if (process.env.NODE_ENV === 'production') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
@@ -56,19 +54,19 @@ function rateLimit({ windowMs, max, keyPrefix, message }) {
   };
 }
 
-function requirePublicApiKey(req, res, next) {
-  const envPath = path.join(__dirname, '../../.env');
-  let fileKey = '';
-  try {
-    const env = fs.readFileSync(envPath, 'utf8');
-    fileKey = (env.match(/^PUBLIC_TICKET_API_KEY=(.*)$/m)?.[1] || '')
-      .trim()
-      .replace(/^['"]|['"]$/g, '');
-  } catch {
-    fileKey = '';
-  }
+function cleanSecret(value) {
+  return String(value || '').trim().replace(/^['"]|['"]$/g, '');
+}
 
-  const configuredKey = fileKey || process.env.PUBLIC_TICKET_API_KEY || process.env.BACKEND_API_KEY;
+function timingSafeEqualText(a, b) {
+  const left = Buffer.from(String(a || ''));
+  const right = Buffer.from(String(b || ''));
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+}
+
+function requirePublicApiKey(req, res, next) {
+  const configuredKey = cleanSecret(process.env.PUBLIC_TICKET_API_KEY || process.env.BACKEND_API_KEY);
   const mustEnforce = process.env.NODE_ENV === 'production' || process.env.REQUIRE_PUBLIC_TICKET_API_KEY === 'true';
 
   if (!configuredKey && !mustEnforce) return next();
@@ -83,13 +81,14 @@ function requirePublicApiKey(req, res, next) {
   const bearerKey = authorization.toLowerCase().startsWith('bearer ')
     ? authorization.slice(7).trim()
     : '';
-  const providedKey = req.headers['x-api-key'] || bearerKey || req.body?.apiKey;
-  if (providedKey !== configuredKey) {
+  const bodyKeyAllowed = process.env.ALLOW_PUBLIC_API_KEY_IN_BODY === 'true' && process.env.NODE_ENV !== 'production';
+  const providedKey = cleanSecret(req.headers['x-api-key'] || bearerKey || (bodyKeyAllowed ? req.body?.apiKey : ''));
+  if (!providedKey || !timingSafeEqualText(providedKey, configuredKey)) {
     auditLog('public_ticket.invalid_api_key', {
       requestId: req.id,
       providedLength: providedKey ? String(providedKey).length : 0,
       configuredLength: configuredKey ? String(configuredKey).length : 0,
-      source: req.headers['x-api-key'] ? 'x-api-key' : bearerKey ? 'authorization' : req.body?.apiKey ? 'body' : 'missing'
+      source: req.headers['x-api-key'] ? 'x-api-key' : bearerKey ? 'authorization' : bodyKeyAllowed && req.body?.apiKey ? 'body' : 'missing'
     });
     return res.status(401).json({
       success: false,
@@ -98,6 +97,29 @@ function requirePublicApiKey(req, res, next) {
   }
 
   next();
+}
+
+function validateProductionConfig() {
+  if (process.env.NODE_ENV !== 'production') return;
+
+  const failures = [];
+  const jwtSecret = cleanSecret(process.env.JWT_SECRET);
+  const publicTicketKey = cleanSecret(process.env.PUBLIC_TICKET_API_KEY || process.env.BACKEND_API_KEY);
+  const corsOrigins = cleanSecret(process.env.CORS_ORIGINS || process.env.FRONTEND_URL);
+
+  if (jwtSecret.length < 32) failures.push('JWT_SECRET must be at least 32 characters in production.');
+  if (publicTicketKey.length < 32) failures.push('PUBLIC_TICKET_API_KEY must be at least 32 characters in production.');
+  if (process.env.REQUIRE_PUBLIC_TICKET_API_KEY !== 'true') failures.push('REQUIRE_PUBLIC_TICKET_API_KEY must be true in production.');
+  if (!corsOrigins || corsOrigins.includes('*') || corsOrigins.includes('localhost')) {
+    failures.push('CORS_ORIGINS/FRONTEND_URL must be an explicit production origin.');
+  }
+  if (String(process.env.LDAP_URL || '').startsWith('ldap://')) {
+    failures.push('Use LDAPS for production Active Directory connections.');
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`Production configuration is not safe:\n- ${failures.join('\n- ')}`);
+  }
 }
 
 function redact(value) {
@@ -123,5 +145,6 @@ module.exports = {
   securityHeaders,
   rateLimit,
   requirePublicApiKey,
+  validateProductionConfig,
   auditLog
 };

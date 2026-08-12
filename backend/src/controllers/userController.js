@@ -3,6 +3,25 @@ const bcrypt = require('bcryptjs');
 const adService = require('../services/adService');
 const prisma = new PrismaClient();
 
+const VALID_ROLES = new Set(['user', 'staff', 'admin']);
+
+function validatePassword(password) {
+  const value = String(password || '');
+  if (value.length < 12) return 'Password must be at least 12 characters.';
+  if (!/[a-z]/.test(value) || !/[A-Z]/.test(value) || !/[0-9]/.test(value)) {
+    return 'Password must include uppercase, lowercase, and numeric characters.';
+  }
+  return null;
+}
+
+function cleanText(value, maxLength) {
+  return String(value || '').trim().slice(0, maxLength);
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ''));
+}
+
 // Get all users with optional filtering
 exports.getAllUsers = async (req, res) => {
   try {
@@ -20,6 +39,7 @@ exports.getAllUsers = async (req, res) => {
         email: true,
         name: true,
         role: true,
+        departmentId: true,
         department: true,
         createdAt: true
       },
@@ -45,36 +65,49 @@ exports.getAllUsers = async (req, res) => {
 // Create new user
 exports.createUser = async (req, res) => {
   try {
-    const { username, password, email, name, role, department, departmentId } = req.body;
+    const { username, password, email, name, role, departmentId } = req.body;
+    const safeUsername = cleanText(username, 80);
+    const safeEmail = cleanText(email, 254).toLowerCase();
+    const safeName = cleanText(name, 160);
+    const safeRole = VALID_ROLES.has(role) ? role : 'staff';
+    const resolvedDepartmentId = departmentId || null;
     
     // Validate required fields
-    if (!username || !password || !email || !name) {
+    if (!safeUsername || !password || !safeEmail || !safeName) {
       return res.status(400).json({
         success: false,
         message: 'Username, password, email, and name are required'
       });
     }
+    if (!isValidEmail(safeEmail)) {
+      return res.status(400).json({ success: false, message: 'A valid email address is required' });
+    }
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({ success: false, message: passwordError });
+    }
     
-    // Check if username already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { username }
+    // Check if username or email already exists
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: safeUsername },
+          { email: safeEmail }
+        ]
+      }
     });
     
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: 'Username already exists'
+        message: existingUser.username === safeUsername ? 'Username already exists' : 'Email already exists'
       });
     }
     
-    // Get department name from departmentId if provided
-    let departmentName = department;
-    if (departmentId && !department) {
-      const dept = await prisma.department.findUnique({
-        where: { id: departmentId }
-      });
-      if (dept) {
-        departmentName = dept.name;
+    if (resolvedDepartmentId) {
+      const dept = await prisma.department.findUnique({ where: { id: resolvedDepartmentId } });
+      if (!dept) {
+        return res.status(400).json({ success: false, message: 'Selected department does not exist' });
       }
     }
     
@@ -84,12 +117,12 @@ exports.createUser = async (req, res) => {
     // Create user
     const user = await prisma.user.create({
       data: {
-        username,
+        username: safeUsername,
         password: hashedPassword,
-        email,
-        name,
-        role: role || 'staff',
-        departmentId: departmentId || null
+        email: safeEmail,
+        name: safeName,
+        role: safeRole,
+        departmentId: resolvedDepartmentId
       },
       select: {
         id: true,
@@ -97,6 +130,7 @@ exports.createUser = async (req, res) => {
         email: true,
         name: true,
         role: true,
+        departmentId: true,
         department: true,
         createdAt: true
       }
@@ -121,7 +155,11 @@ exports.createUser = async (req, res) => {
 exports.updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { username, email, name, role, department, departmentId, password } = req.body;
+    const { username, email, name, role, departmentId, password } = req.body;
+    const safeUsername = username !== undefined ? cleanText(username, 80) : undefined;
+    const safeEmail = email !== undefined ? cleanText(email, 254).toLowerCase() : undefined;
+    const safeName = name !== undefined ? cleanText(name, 160) : undefined;
+    const safeRole = role !== undefined ? role : undefined;
     
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
@@ -135,24 +173,50 @@ exports.updateUser = async (req, res) => {
       });
     }
     
-    // Get department name from departmentId if provided
-    let departmentName = department;
-    if (departmentId && !department) {
-      const dept = await prisma.department.findUnique({
-        where: { id: departmentId }
-      });
-      if (dept) {
-        departmentName = dept.name;
+    if (departmentId) {
+      const dept = await prisma.department.findUnique({ where: { id: departmentId } });
+      if (!dept) {
+        return res.status(400).json({ success: false, message: 'Selected department does not exist' });
       }
     }
     
+    if (safeEmail !== undefined && !isValidEmail(safeEmail)) {
+      return res.status(400).json({ success: false, message: 'A valid email address is required' });
+    }
+    if (safeRole !== undefined && !VALID_ROLES.has(safeRole)) {
+      return res.status(400).json({ success: false, message: 'Invalid role' });
+    }
+    if (safeUsername || safeEmail) {
+      const duplicate = await prisma.user.findFirst({
+        where: {
+          id: { not: id },
+          OR: [
+            ...(safeUsername ? [{ username: safeUsername }] : []),
+            ...(safeEmail ? [{ email: safeEmail }] : [])
+          ]
+        }
+      });
+      if (duplicate) {
+        return res.status(400).json({
+          success: false,
+          message: duplicate.username === safeUsername ? 'Username already exists' : 'Email already exists'
+        });
+      }
+    }
+    if (password) {
+      const passwordError = validatePassword(password);
+      if (passwordError) {
+        return res.status(400).json({ success: false, message: passwordError });
+      }
+    }
+
     // Prepare update data
     const updateData = {
-      ...(username && { username }),
-      ...(email && { email }),
-      ...(name && { name }),
-      ...(role && { role }),
-      ...(departmentId && { departmentId: departmentId })
+      ...(safeUsername && { username: safeUsername }),
+      ...(safeEmail && { email: safeEmail }),
+      ...(safeName && { name: safeName }),
+      ...(safeRole && { role: safeRole }),
+      ...(departmentId !== undefined && { departmentId: departmentId || null })
     };
     
     // Hash password if provided
@@ -170,6 +234,7 @@ exports.updateUser = async (req, res) => {
         email: true,
         name: true,
         role: true,
+        departmentId: true,
         department: true,
         createdAt: true,
         updatedAt: true

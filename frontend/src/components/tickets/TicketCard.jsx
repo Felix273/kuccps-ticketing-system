@@ -57,6 +57,12 @@ export const TicketCard = ({ ticket, onClaim, onViewDetails, currentUser }) => {
                 From Email
               </span>
             )}
+            {ticket.isOverdue && (
+              <span className="px-2 py-1 text-xs rounded bg-red-100 text-red-700 border border-red-200 flex items-center gap-1 font-semibold">
+                <Clock className="w-3 h-3" />
+                Overdue
+              </span>
+            )}
           </div>
           <h3 className="text-lg font-bold text-gray-900 mb-2 break-words">{ticket.subject}</h3>
           <p className="text-sm text-gray-600 line-clamp-2 break-words overflow-hidden">{ticket.description}</p>
@@ -104,7 +110,7 @@ export const TicketCard = ({ ticket, onClaim, onViewDetails, currentUser }) => {
           className="flex-1 px-4 py-2 bg-gradient-to-r from-[#911414] to-[#d20001] text-white rounded-lg hover:from-[#ac0807] hover:to-[#911414] font-medium transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
         >
           <Hand className="w-4 h-4" />
-          {ticket.assignedToId === currentUser?.id ? 'Claimed' : ticket.assignedTo ? 'Claim from Agent' : 'Claim'}
+          {ticket.assignedToId === currentUser?.id ? 'Claimed' : ticket.assignedTo ? 'Transfer Claim' : 'Claim'}
         </button>
       </div>
     </div>

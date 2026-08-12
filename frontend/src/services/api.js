@@ -52,7 +52,13 @@ class ApiService {
         throw new Error('Authentication failed. Please login again.');
       }
       
-      const data = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/json')
+        ? await response.json()
+        : {
+            success: response.ok,
+            message: await response.text()
+          };
       
       // Check if response indicates failure
       if (!response.ok && !data.success) {

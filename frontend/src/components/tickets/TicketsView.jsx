@@ -440,6 +440,8 @@ export const TicketsView = ({ tickets = [], isLoading, error, onRefresh }) => {
           ticket={viewingTicket}
           onClose={() => setViewingTicket(null)}
           onUpdate={onRefresh}
+          currentUser={currentUser}
+          users={users}
         />
       )}
 

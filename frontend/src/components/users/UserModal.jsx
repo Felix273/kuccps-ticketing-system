@@ -52,8 +52,6 @@ export const UserModal = ({ user, onClose, onSave }) => {
         dataToSave.password = formData.password;
       }
 
-      console.log('Saving user with data:', dataToSave);
-
       const result = await onSave(dataToSave);
 
       if (result.success) {

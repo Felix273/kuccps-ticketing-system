@@ -5,6 +5,34 @@ const prisma = new PrismaClient();
 
 const VALID_PRIORITIES = new Set(['Low', 'Medium', 'High', 'Critical']);
 const VALID_STATUSES = new Set(['Open', 'In Progress', 'Resolved', 'Closed']);
+const ACTIVE_STATUSES = new Set(['Open', 'In Progress']);
+
+function getDefaultResolutionMinutes(priority) {
+  const defaults = {
+    Critical: 4 * 60,
+    High: 8 * 60,
+    Medium: 24 * 60,
+    Low: 72 * 60
+  };
+  return defaults[priority] || defaults.Medium;
+}
+
+function getSlaDueAt(createdAt, priority, slaPolicy) {
+  const resolutionMinutes = slaPolicy?.resolutionMinutes || getDefaultResolutionMinutes(priority);
+  return new Date(new Date(createdAt).getTime() + resolutionMinutes * 60 * 1000);
+}
+
+function decorateTicket(ticket) {
+  if (!ticket) return ticket;
+  const isActive = ACTIVE_STATUSES.has(ticket.status);
+  const dueAt = ticket.slaDueAt ? new Date(ticket.slaDueAt) : null;
+  const isOverdue = Boolean(isActive && dueAt && new Date() > dueAt);
+  return {
+    ...ticket,
+    isOverdue,
+    overdueMinutes: isOverdue ? Math.floor((Date.now() - dueAt.getTime()) / 60000) : 0
+  };
+}
 
 function cleanText(value, maxLength) {
   return String(value || '')
@@ -15,6 +43,14 @@ function cleanText(value, maxLength) {
 
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ''));
+}
+
+function cleanFilename(value) {
+  return String(value || 'attachment')
+    .split(/[\\/]/)
+    .pop()
+    .replace(/[^a-zA-Z0-9._ -]/g, '_')
+    .slice(0, 180) || 'attachment';
 }
 
 async function generateTicketNumber() {
@@ -71,9 +107,13 @@ exports.createTicket = async (req, res) => {
     if (priority && !VALID_PRIORITIES.has(priority)) {
       return res.status(400).json({ success: false, message: 'Invalid priority' });
     }
+    let existingUser = null;
     let createdById = null;
     try {
-      const existingUser = await prisma.user.findUnique({ where: { email: email } });
+      existingUser = await prisma.user.findUnique({
+        where: { email: email },
+        select: { id: true, departmentId: true }
+      });
       if (existingUser) {
         createdById = existingUser.id;
       }
@@ -81,12 +121,24 @@ exports.createTicket = async (req, res) => {
       auditLog('ticket.user_lookup_failed', { requestId: req.id, error: userError.message });
     }
     let resolvedDepartmentId = departmentId || null;
+    if (!resolvedDepartmentId && existingUser?.departmentId) {
+      resolvedDepartmentId = existingUser.departmentId;
+    }
     if (!resolvedDepartmentId && email) {
       try {
         const departments = await prisma.department.findMany();
         resolvedDepartmentId = departments.length > 0 ? departments[0].id : null;
       } catch (deptError) {
         auditLog('ticket.department_lookup_failed', { requestId: req.id, error: deptError.message });
+      }
+    }
+    if (resolvedDepartmentId) {
+      const departmentExists = await prisma.department.findUnique({
+        where: { id: resolvedDepartmentId },
+        select: { id: true }
+      });
+      if (!departmentExists) {
+        return res.status(400).json({ success: false, message: 'Selected department does not exist' });
       }
     }
 
@@ -100,9 +152,7 @@ exports.createTicket = async (req, res) => {
       category: resolvedCategory,
       departmentId: resolvedDepartmentId
     });
-    const slaDueAt = slaPolicy
-      ? new Date(Date.now() + slaPolicy.resolutionMinutes * 60 * 1000)
-      : null;
+    const slaDueAt = getSlaDueAt(new Date(), resolvedPriority, slaPolicy);
     const ticket = await prisma.ticket.create({
       data: {
         ticketNumber,
@@ -115,7 +165,8 @@ exports.createTicket = async (req, res) => {
         status: settings ? (settings.defaultStatus || 'Open') : 'Open',
         departmentId: resolvedDepartmentId,
         createdById: createdById,
-        slaDueAt
+        slaDueAt,
+        slaBreached: new Date() > slaDueAt
       },
       include: { department: true, assignedTo: true, createdBy: true }
     });
@@ -134,7 +185,7 @@ exports.createTicket = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: 'Ticket created successfully',
-      ticket: { id: ticket.id, ticketNumber: ticket.ticketNumber, subject: ticket.subject, status: ticket.status, priority: ticket.priority, category: ticket.category, createdAt: ticket.createdAt }
+      ticket: { id: ticket.id, ticketNumber: ticket.ticketNumber, subject: ticket.subject, status: ticket.status, priority: ticket.priority, category: ticket.category, createdAt: ticket.createdAt, slaDueAt: ticket.slaDueAt }
     });
   } catch (error) {
     console.error('Error creating ticket:', { requestId: req.id, message: error.message });
@@ -148,7 +199,7 @@ exports.getAllTickets = async (req, res) => {
       include: { department: true, assignedTo: { select: { id: true, name: true, email: true } }, createdBy: { select: { id: true, name: true, email: true } }, _count: { select: { comments: true } } },
       orderBy: { createdAt: 'desc' }
     });
-    return res.json({ success: true, tickets });
+    return res.json({ success: true, tickets: tickets.map(decorateTicket) });
   } catch (error) {
     console.error('Error fetching tickets:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch tickets' });
@@ -165,7 +216,7 @@ exports.getTicketById = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({ success: false, message: 'Ticket not found' });
     }
-    return res.json({ success: true, ticket });
+    return res.json({ success: true, ticket: decorateTicket(ticket) });
   } catch (error) {
     console.error('Error fetching ticket:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch ticket' });
@@ -215,10 +266,33 @@ exports.updateTicket = async (req, res) => {
       historyEntries.push({ field: 'priority', oldValue: existing.priority, newValue: priority });
     }
     if (assignedToId !== undefined && assignedToId !== existing.assignedToId) {
+      if (assignedToId) {
+        const assignee = await prisma.user.findUnique({
+          where: { id: assignedToId },
+          select: { id: true, role: true }
+        });
+        if (!assignee || !['staff', 'admin'].includes(assignee.role)) {
+          return res.status(400).json({ success: false, message: 'Ticket can only be claimed by ICT staff or administrators' });
+        }
+      }
       updateData.assignedToId = assignedToId || null;
       historyEntries.push({ field: 'assignedTo', oldValue: existing.assignedToId, newValue: assignedToId });
+      if (assignedToId && existing.status === 'Open' && status === undefined) {
+        updateData.status = 'In Progress';
+        historyEntries.push({ field: 'status', oldValue: existing.status, newValue: 'In Progress' });
+        if (!existing.responseTime) {
+          updateData.responseTime = Math.floor((new Date() - new Date(existing.createdAt)) / 60000);
+        }
+      }
     }
     if (departmentId && departmentId !== existing.departmentId) {
+      const departmentExists = await prisma.department.findUnique({
+        where: { id: departmentId },
+        select: { id: true }
+      });
+      if (!departmentExists) {
+        return res.status(400).json({ success: false, message: 'Selected department does not exist' });
+      }
       updateData.departmentId = departmentId;
       historyEntries.push({ field: 'department', oldValue: existing.departmentId, newValue: departmentId });
     }
@@ -229,8 +303,14 @@ exports.updateTicket = async (req, res) => {
         category: updateData.category || existing.category,
         departmentId: updateData.departmentId || existing.departmentId
       });
-      if (slaPolicy && !['Resolved', 'Closed'].includes(updateData.status || existing.status)) {
-        updateData.slaDueAt = new Date(new Date(existing.createdAt).getTime() + slaPolicy.resolutionMinutes * 60 * 1000);
+      if (!['Resolved', 'Closed'].includes(updateData.status || existing.status)) {
+        updateData.slaDueAt = getSlaDueAt(existing.createdAt, updateData.priority || existing.priority, slaPolicy);
+      }
+    }
+    if ((updateData.status || status) === 'Open') {
+      updateData.assignedToId = null;
+      if (existing.assignedToId) {
+        historyEntries.push({ field: 'assignedTo', oldValue: existing.assignedToId, newValue: '' });
       }
     }
     if (updateData.slaDueAt || existing.slaDueAt) {
@@ -264,10 +344,74 @@ exports.updateTicket = async (req, res) => {
         comment: `Your ticket has been claimed by ${ticket.assignedTo?.name || 'a support agent'}.`
       });
     }
-    return res.json({ success: true, ticket });
+    return res.json({ success: true, ticket: decorateTicket(ticket) });
   } catch (error) {
     console.error('Error updating ticket:', error);
     return res.status(500).json({ success: false, message: 'Failed to update ticket' });
+  }
+};
+
+exports.escalateTicket = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { targetUserId, escalationType, reason } = req.body;
+    const userId = req.user?.id;
+    const safeReason = cleanText(reason, 1000);
+    const type = escalationType === 'vertical' ? 'vertical' : 'horizontal';
+
+    if (!targetUserId) {
+      return res.status(400).json({ success: false, message: 'Target officer is required' });
+    }
+
+    const [ticket, targetUser] = await Promise.all([
+      prisma.ticket.findUnique({ where: { id } }),
+      prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true, name: true, email: true, role: true } })
+    ]);
+
+    if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found' });
+    if (!targetUser) return res.status(404).json({ success: false, message: 'Target officer not found' });
+    if (!['staff', 'admin'].includes(targetUser.role)) {
+      return res.status(400).json({ success: false, message: 'Escalation target must be ICT staff or an administrator' });
+    }
+    if (['Resolved', 'Closed'].includes(ticket.status)) {
+      return res.status(400).json({ success: false, message: 'Resolved or closed tickets cannot be escalated' });
+    }
+
+    const updateData = {
+      assignedToId: targetUser.id,
+      status: ticket.status === 'Open' ? 'In Progress' : ticket.status,
+      responseTime: ticket.responseTime || Math.floor((new Date() - new Date(ticket.createdAt)) / 60000)
+    };
+
+    const updated = await prisma.ticket.update({
+      where: { id },
+      data: updateData,
+      include: { department: true, assignedTo: { select: { id: true, name: true, email: true } }, createdBy: { select: { id: true, name: true, email: true } } }
+    });
+
+    await prisma.ticketHistory.create({
+      data: {
+        ticketId: id,
+        changedBy: userId || '',
+        field: 'escalation',
+        oldValue: ticket.assignedToId || '',
+        newValue: `${type}:${targetUser.name}${safeReason ? ` - ${safeReason}` : ''}`
+      }
+    });
+
+    await prisma.comment.create({
+      data: {
+        ticketId: id,
+        userId: userId || null,
+        isInternal: true,
+        content: `Escalated ${type} to ${targetUser.name}.${safeReason ? ` Reason: ${safeReason}` : ''}`
+      }
+    });
+
+    return res.json({ success: true, message: 'Ticket escalated successfully', ticket: decorateTicket(updated) });
+  } catch (error) {
+    console.error('Error escalating ticket:', error);
+    return res.status(500).json({ success: false, message: 'Failed to escalate ticket' });
   }
 };
 
@@ -279,6 +423,10 @@ exports.addComment = async (req, res) => {
     const safeContent = cleanText(content, 10000);
     if (!safeContent) {
       return res.status(400).json({ success: false, message: 'Comment content is required' });
+    }
+    const existingTicket = await prisma.ticket.findUnique({ where: { id }, select: { id: true } });
+    if (!existingTicket) {
+      return res.status(404).json({ success: false, message: 'Ticket not found' });
     }
     const comment = await prisma.comment.create({
       data: { ticketId: id, userId: userId, content: safeContent, isInternal: isInternal || false },
@@ -313,10 +461,11 @@ exports.addAttachment = async (req, res) => {
     const ticket = await prisma.ticket.findUnique({ where: { id } });
     if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found' });
 
+    const originalName = cleanFilename(req.file.originalname);
     const attachment = await prisma.attachment.create({
       data: {
         ticketId: id,
-        filename: req.file.originalname,
+        filename: originalName,
         filepath: req.file.path,
         mimetype: req.file.mimetype,
         size: req.file.size
@@ -328,7 +477,7 @@ exports.addAttachment = async (req, res) => {
         ticketId: id,
         field: 'attachment',
         oldValue: '',
-        newValue: req.file.originalname,
+        newValue: originalName,
         changedBy: req.user?.id || ''
       }
     });
@@ -342,13 +491,14 @@ exports.addAttachment = async (req, res) => {
 
 exports.getStatistics = async (req, res) => {
   try {
-    const [total, open, inProgress, resolved, closed, critical] = await Promise.all([
+    const [total, open, inProgress, resolved, closed, critical, overdue] = await Promise.all([
       prisma.ticket.count(),
       prisma.ticket.count({ where: { status: 'Open' } }),
       prisma.ticket.count({ where: { status: 'In Progress' } }),
       prisma.ticket.count({ where: { status: 'Resolved' } }),
       prisma.ticket.count({ where: { status: 'Closed' } }),
-      prisma.ticket.count({ where: { priority: 'Critical', status: { notIn: ['Resolved', 'Closed'] } } })
+      prisma.ticket.count({ where: { priority: 'Critical', status: { notIn: ['Resolved', 'Closed'] } } }),
+      prisma.ticket.count({ where: { status: { in: ['Open', 'In Progress'] }, slaDueAt: { lt: new Date() } } })
     ]);
     return res.json({
       success: true,
@@ -365,6 +515,7 @@ exports.getStatistics = async (req, res) => {
         resolvedTickets: resolved,
         closedTickets: closed,
         criticalTickets: critical,
+        overdueTickets: overdue,
         assignedTickets: await prisma.ticket.count({ where: { assignedToId: { not: null } } })
       }
     });

@@ -2,14 +2,20 @@ import React from 'react';
 import { Building2, Edit, Trash2, FileText, Users, TrendingUp, AlertCircle } from 'lucide-react';
 
 export const DepartmentCard = ({ department, tickets = [], users = [], onEdit, onDelete, onViewDetails }) => {
-  const canDelete = !department._count?.tickets || department._count.tickets === 0;
-  
   // Calculate department statistics
-  const deptUsers = users.filter(u => u.department === department.name);
+  const deptUsers = users.filter(u =>
+    u.departmentId === department.id ||
+    u.department?.id === department.id ||
+    u.department?.name === department.name ||
+    u.department === department.name
+  );
   const deptTickets = tickets.filter(t => 
     t.department?.name === department.name || 
     deptUsers.some(u => u.id === t.assignedToId)
   );
+  const ticketCount = department._count?.tickets || deptTickets.length;
+  const userCount = department._count?.users || deptUsers.length;
+  const canDelete = ticketCount === 0 && userCount === 0 && deptTickets.length === 0 && deptUsers.length === 0;
   
   const openTickets = deptTickets.filter(t => t.status === 'Open').length;
   const inProgressTickets = deptTickets.filter(t => t.status === 'In Progress').length;
@@ -46,14 +52,14 @@ export const DepartmentCard = ({ department, tickets = [], users = [], onEdit, o
             <Edit className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
           <button 
-            onClick={(e) => { e.stopPropagation(); onDelete(department.id, deptTickets.length); }}
+            onClick={(e) => { e.stopPropagation(); onDelete(department.id, deptTickets.length || ticketCount); }}
             className={`p-1.5 sm:p-2 rounded-lg transition-colors ${
-              canDelete && deptTickets.length === 0
+              canDelete
                 ? 'text-red-600 hover:bg-red-100' 
                 : 'text-gray-400 cursor-not-allowed'
             }`}
-            title={canDelete && deptTickets.length === 0 ? 'Delete Department' : 'Cannot delete - has tickets or users'}
-            disabled={!canDelete || deptTickets.length > 0}
+            title={canDelete ? 'Delete Department' : 'Cannot delete - has tickets or users'}
+            disabled={!canDelete}
           >
             <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
@@ -67,7 +73,7 @@ export const DepartmentCard = ({ department, tickets = [], users = [], onEdit, o
             <Users className="w-3 h-3 sm:w-4 sm:h-4 text-blue-600" />
             <span className="text-xs font-medium text-gray-600">Staff</span>
           </div>
-          <p className="text-xl sm:text-2xl font-bold text-gray-900">{deptUsers.length}</p>
+          <p className="text-xl sm:text-2xl font-bold text-gray-900">{userCount}</p>
         </div>
 
         <div className="bg-white rounded-lg p-2 sm:p-3 border border-gray-200">

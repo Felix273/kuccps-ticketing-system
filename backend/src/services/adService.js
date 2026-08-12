@@ -93,12 +93,13 @@ function assertConfigured(settings) {
 
 function createClient(settings) {
   assertConfigured(settings);
+  const rejectUnauthorized = String(process.env.LDAP_TLS_REJECT_UNAUTHORIZED || 'true').toLowerCase() !== 'false';
   return ldap.createClient({
     url: settings.ldapUrl,
     timeout: 10000,
     connectTimeout: 10000,
     reconnect: false,
-    tlsOptions: { rejectUnauthorized: false }
+    tlsOptions: { rejectUnauthorized }
   });
 }
 

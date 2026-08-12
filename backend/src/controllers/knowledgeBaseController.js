@@ -25,6 +25,48 @@ function scoreArticle(article, terms, category) {
   return termScore + categoryScore + Math.min(article.helpful || 0, 5) * 0.2;
 }
 
+function average(values) {
+  return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : null;
+}
+
+function inferPriority(ticket) {
+  const text = `${ticket.subject || ''} ${ticket.description || ''}`.toLowerCase();
+  const criticalSignals = ['all users', 'entire office', 'system down', 'cannot login', 'outage', 'breach', 'security incident', 'production', 'urgent'];
+  const highSignals = ['many users', 'deadline', 'payment', 'portal', 'network down', 'email down', 'blocked'];
+
+  if (criticalSignals.some(signal => text.includes(signal))) return 'Critical';
+  if (highSignals.some(signal => text.includes(signal))) return 'High';
+  if (text.length < 80) return 'Medium';
+  return ticket.priority || 'Medium';
+}
+
+function getMissingInfo(ticket) {
+  const text = `${ticket.subject || ''} ${ticket.description || ''}`.toLowerCase();
+  const missing = [];
+
+  if (!/(office|room|floor|building|location|desk|branch|station)/i.test(text)) {
+    missing.push('Requester location or office is not clear.');
+  }
+  if (!/(error|screenshot|message|code|failed|warning|prompt)/i.test(text)) {
+    missing.push('Exact error message or screenshot is not included.');
+  }
+  if (!/(asset|serial|tag|device|laptop|printer|computer|ip|mac)/i.test(text) && /(hardware|printer|network|device|computer|laptop)/i.test(ticket.category || text)) {
+    missing.push('Affected device, asset tag, IP address, or serial number may be needed.');
+  }
+  if (!/(one user|all users|many users|department|directorate|everyone|team)/i.test(text)) {
+    missing.push('Impact scope is not stated clearly.');
+  }
+
+  return missing.slice(0, 4);
+}
+
+function similarityScore(ticket, other) {
+  const terms = new Set(getTerms(`${ticket.subject} ${ticket.description}`));
+  const otherTerms = new Set(getTerms(`${other.subject} ${other.description}`));
+  const overlap = [...terms].filter(term => otherTerms.has(term)).length;
+  return overlap + (ticket.category === other.category ? 2 : 0);
+}
+
 exports.getArticles = async (req, res) => {
   try {
     const { q, category, status } = req.query;
@@ -180,6 +222,11 @@ exports.getKnowledgeInsights = async (req, res) => {
     ]);
 
     const categoryCounts = {};
+    const articleCoverage = {};
+    articles.forEach(article => {
+      articleCoverage[article.category] = (articleCoverage[article.category] || 0) + 1;
+    });
+
     tickets.forEach(ticket => {
       categoryCounts[ticket.category] = (categoryCounts[ticket.category] || 0) + 1;
     });
@@ -198,7 +245,7 @@ exports.getKnowledgeInsights = async (req, res) => {
     const resolutionTimes = Object.entries(resolutionByCategory)
       .map(([category, values]) => ({
         category,
-        averageMinutes: Math.round(values.reduce((sum, value) => sum + value, 0) / values.length),
+        averageMinutes: average(values),
         resolvedTickets: values.length
       }))
       .sort((a, b) => b.averageMinutes - a.averageMinutes);
@@ -215,6 +262,30 @@ exports.getKnowledgeInsights = async (req, res) => {
       .sort((a, b) => b.count - a.count)
       .slice(0, 12);
 
+    const knowledgeGaps = recurringIssues
+      .map(issue => ({
+        category: issue.category,
+        tickets: issue.count,
+        articles: articleCoverage[issue.category] || 0,
+        recommendation: articleCoverage[issue.category]
+          ? `Review whether the ${articleCoverage[issue.category]} article(s) for this category answer the repeated ticket pattern.`
+          : 'Create a knowledge-base article for this recurring category.'
+      }))
+      .filter(issue => issue.tickets >= 2 && issue.articles < Math.ceil(issue.tickets / 5))
+      .slice(0, 6);
+
+    const articleEffectiveness = articles
+      .map(article => ({
+        title: article.title,
+        category: article.category,
+        views: article.views,
+        helpful: article.helpful,
+        notHelpful: article.notHelpful,
+        score: article.views + article.helpful * 3 - article.notHelpful * 2
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8);
+
     res.json({
       success: true,
       insights: {
@@ -223,6 +294,8 @@ exports.getKnowledgeInsights = async (req, res) => {
         recurringIssues,
         resolutionTimes,
         commonTerms,
+        knowledgeGaps,
+        articleEffectiveness,
         overview: recurringIssues.length
           ? `Most recurring category is ${recurringIssues[0].category} with ${recurringIssues[0].count} ticket(s).`
           : 'Not enough ticket history yet for recurring issue analysis.'
@@ -240,15 +313,18 @@ exports.getTicketSuggestions = async (req, res) => {
       where: { id: req.params.ticketId },
       select: {
         id: true,
+        ticketNumber: true,
         subject: true,
         description: true,
         category: true,
-        priority: true
+        priority: true,
+        status: true,
+        createdAt: true
       }
     });
     if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found' });
 
-    const [articles, categoryHistory] = await Promise.all([
+    const [articles, categoryHistory, activeTickets] = await Promise.all([
       prisma.knowledgeArticle.findMany({ where: { status: 'published' } }),
       prisma.ticket.findMany({
         where: {
@@ -262,6 +338,23 @@ exports.getTicketSuggestions = async (req, res) => {
         },
         orderBy: { updatedAt: 'desc' },
         take: 10
+      }),
+      prisma.ticket.findMany({
+        where: {
+          id: { not: ticket.id },
+          status: { in: ['Open', 'In Progress'] }
+        },
+        select: {
+          id: true,
+          ticketNumber: true,
+          subject: true,
+          description: true,
+          category: true,
+          priority: true,
+          status: true
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100
       })
     ]);
 
@@ -280,8 +373,22 @@ exports.getTicketSuggestions = async (req, res) => {
       .slice(0, 5);
 
     const avgResolution = categoryHistory.length
-      ? Math.round(categoryHistory.reduce((sum, item) => sum + item.resolutionTime, 0) / categoryHistory.length)
+      ? average(categoryHistory.map(item => item.resolutionTime))
       : null;
+    const missingInfo = getMissingInfo(ticket);
+    const inferredPriority = inferPriority(ticket);
+    const similarTickets = activeTickets
+      .map(item => ({ ...item, score: similarityScore(ticket, item) }))
+      .filter(item => item.score >= 4)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map(item => ({
+        ticketNumber: item.ticketNumber,
+        subject: item.subject,
+        category: item.category,
+        priority: item.priority,
+        status: item.status
+      }));
 
     res.json({
       success: true,
@@ -291,9 +398,19 @@ exports.getTicketSuggestions = async (req, res) => {
           : 'No strong knowledge-base match yet. Capture the resolution as a new article after solving this ticket.',
         recommendedActions: [
           `Confirm requester impact and exact affected service for ${ticket.category}.`,
+          missingInfo.length ? `Ask for missing details: ${missingInfo.join(' ')}` : 'Ticket has enough basic detail to start triage.',
+          inferredPriority !== ticket.priority ? `Review priority: content suggests ${inferredPriority}, current priority is ${ticket.priority}.` : `Priority appears consistent as ${ticket.priority}.`,
+          similarTickets.length ? `Check ${similarTickets.length} similar active ticket(s) before creating duplicate work.` : 'No strong duplicate active-ticket signal detected.',
           ticket.priority === 'Critical' ? 'Escalate immediately and post regular updates.' : 'Check similar resolved tickets before escalating.',
           avgResolution ? `Historical average resolution for this category is about ${avgResolution} minutes.` : 'No resolution baseline exists yet for this category.'
         ],
+        missingInfo,
+        priorityAssessment: {
+          current: ticket.priority,
+          suggested: inferredPriority,
+          shouldReview: inferredPriority !== ticket.priority
+        },
+        similarTickets,
         articles: suggestions,
         history: {
           averageResolutionMinutes: avgResolution,

@@ -5,7 +5,12 @@ export const DepartmentDetailModal = ({ department, tickets = [], users = [], on
   const [sortBy, setSortBy] = useState('tickets');
 
   const deptUsers = useMemo(() => {
-    return users.filter(u => u.department === department.name);
+    return users.filter(u =>
+      u.departmentId === department.id ||
+      u.department?.id === department.id ||
+      u.department?.name === department.name ||
+      u.department === department.name
+    );
   }, [users, department]);
 
   const deptTickets = useMemo(() => {

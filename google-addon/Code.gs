@@ -4,7 +4,7 @@
  */
 
 const DEFAULT_CONFIG = {
-  API_URL: 'https://adventure-buys-rim-towns.trycloudflare.com/api/public/tickets',
+  API_URL: 'https://store-town-icq-substantially.trycloudflare.com/api/public/tickets',
   SUPPORT_EMAIL: 'emmanuel.kitanga@kuccps.ac.ke',
   BACKEND_API_KEY: ''
 };
@@ -38,9 +38,9 @@ function getConfig() {
   const properties = PropertiesService.getScriptProperties();
 
   return {
-    API_URL: properties.getProperty('API_URL') || DEFAULT_CONFIG.API_URL,
-    SUPPORT_EMAIL: properties.getProperty('SUPPORT_EMAIL') || DEFAULT_CONFIG.SUPPORT_EMAIL,
-    BACKEND_API_KEY: properties.getProperty('BACKEND_API_KEY') || DEFAULT_CONFIG.BACKEND_API_KEY
+    API_URL: cleanProperty(properties.getProperty('API_URL')) || DEFAULT_CONFIG.API_URL,
+    SUPPORT_EMAIL: cleanProperty(properties.getProperty('SUPPORT_EMAIL')) || DEFAULT_CONFIG.SUPPORT_EMAIL,
+    BACKEND_API_KEY: cleanProperty(properties.getProperty('BACKEND_API_KEY')) || DEFAULT_CONFIG.BACKEND_API_KEY
   };
 }
 
@@ -51,7 +51,6 @@ function setupProductionProperties() {
 
   if (!existing.API_URL) values.API_URL = DEFAULT_CONFIG.API_URL;
   if (!existing.SUPPORT_EMAIL) values.SUPPORT_EMAIL = DEFAULT_CONFIG.SUPPORT_EMAIL;
-  if (!existing.BACKEND_API_KEY) values.BACKEND_API_KEY = DEFAULT_CONFIG.BACKEND_API_KEY;
 
   if (Object.keys(values).length > 0) {
     properties.setProperties(values, false);
@@ -154,8 +153,7 @@ function submitTicket(e) {
       description: String(formInput.description).trim(),
       requesterEmail: userEmail,
       category: formInput.category || 'General Issues',
-      priority: formInput.priority || 'Medium',
-      apiKey: config.BACKEND_API_KEY
+      priority: formInput.priority || 'Medium'
     };
 
     const response = submitToBackend(ticketData, config);
@@ -175,6 +173,10 @@ function submitTicket(e) {
 
 function submitToBackend(ticketData, config) {
   try {
+    if (!/^https?:\/\//i.test(config.API_URL)) {
+      throw new Error('Backend URL is invalid. Check API_URL in Script Properties.');
+    }
+
     const headers = {};
 
     if (config.BACKEND_API_KEY) {
@@ -191,13 +193,31 @@ function submitToBackend(ticketData, config) {
     };
 
     const response = UrlFetchApp.fetch(config.API_URL, options);
+    const statusCode = response.getResponseCode();
     const responseText = response.getContentText();
 
     Logger.log('Backend URL: ' + config.API_URL);
-    Logger.log('Backend status: ' + response.getResponseCode());
+    Logger.log('Backend status: ' + statusCode);
     Logger.log('Backend response: ' + responseText);
 
-    return JSON.parse(responseText);
+    let parsed;
+    try {
+      parsed = JSON.parse(responseText);
+    } catch (parseError) {
+      return {
+        success: false,
+        message: 'Backend returned HTTP ' + statusCode + ': ' + responseText.slice(0, 160)
+      };
+    }
+
+    if (statusCode < 200 || statusCode >= 300) {
+      return {
+        success: false,
+        message: parsed.message || ('Backend returned HTTP ' + statusCode)
+      };
+    }
+
+    return parsed;
   } catch (error) {
     Logger.log('Backend API error: ' + error);
     return {
@@ -283,6 +303,10 @@ function createErrorCard(errorMessage) {
   return CardService.newActionResponseBuilder()
     .setNavigation(CardService.newNavigation().updateCard(card.build()))
     .build();
+}
+
+function cleanProperty(value) {
+  return value === null || value === undefined ? '' : String(value).trim();
 }
 
 function escapeHtml(value) {

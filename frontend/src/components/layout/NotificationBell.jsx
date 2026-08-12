@@ -63,6 +63,12 @@ export const NotificationBell = ({ onOpenSettings }) => {
 
   const handleMarkAsRead = async (notificationId, event) => {
     event.stopPropagation();
+    if (String(notificationId).startsWith('overdue-')) {
+      setNotifications(prev => prev.map(item => item.id === notificationId ? { ...item, isRead: true } : item));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+      return;
+    }
+
     try {
       const result = await notificationService.markAsRead(notificationId);
       if (result.success) {
@@ -86,6 +92,12 @@ export const NotificationBell = ({ onOpenSettings }) => {
 
   const handleDelete = async (notificationId, event) => {
     event.stopPropagation();
+    if (String(notificationId).startsWith('overdue-')) {
+      setNotifications(prev => prev.filter(item => item.id !== notificationId));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+      return;
+    }
+
     try {
       const result = await notificationService.deleteNotification(notificationId);
       if (result.success) {

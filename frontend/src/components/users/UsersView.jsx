@@ -24,21 +24,14 @@ export const UsersView = () => {
   };
 
   const handleSave = async (data) => {
-    console.log('📤 Sending user data to backend:', JSON.stringify(data, null, 2));
-    
     let result;
     if (editingUser) {
-      console.log('🔄 Updating existing user:', editingUser.id);
       result = await updateUser(editingUser.id, data);
     } else {
-      console.log('➕ Creating new user');
       result = await createUser(data);
     }
 
-    console.log('📥 Backend response:', JSON.stringify(result, null, 2));
-
     if (result.success) {
-      console.log('✅ User saved successfully! Refreshing list...');
       // Force refresh after save
       setTimeout(() => {
         refetch();
@@ -85,18 +78,6 @@ export const UsersView = () => {
     return matchesSearch && matchesRole;
   });
 
-  // Debug: Log users when they change
-  React.useEffect(() => {
-    console.log('👥 Current users count:', users.length);
-    if (users.length > 0) {
-      console.log('📋 Sample user data:', {
-        name: users[0].name,
-        departmentId: users[0].departmentId,
-        department: users[0].department
-      });
-    }
-  }, [users]);
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -120,10 +101,7 @@ export const UsersView = () => {
           </div>
           <div className="flex gap-3">
             <button
-              onClick={() => {
-                console.log('🔄 Manual refresh triggered');
-                refetch();
-              }}
+              onClick={refetch}
               className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2 font-medium transition-colors"
             >
               <RefreshCw className="w-5 h-5" />

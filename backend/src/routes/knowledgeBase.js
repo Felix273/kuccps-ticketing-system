@@ -6,16 +6,34 @@ const { authenticateToken, requireStaffOrAdmin } = require('../middleware/auth')
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }
+  limits: { fileSize: parseInt(process.env.MAX_KB_UPLOAD_BYTES, 10) || 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = new Set([
+      'text/plain',
+      'text/markdown',
+      'text/csv',
+      'application/json',
+      'application/xml',
+      'text/xml',
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/msword'
+    ]);
+    const allowedExtensions = /\.(txt|md|csv|json|log|xml|pdf|doc|docx)$/i;
+    if (!allowedTypes.has(file.mimetype) && !allowedExtensions.test(file.originalname)) {
+      return cb(new Error('File type is not allowed'));
+    }
+    cb(null, true);
+  }
 });
 
 router.get('/public/articles', knowledgeBaseController.getArticles);
 router.get('/public/articles/:idOrSlug', knowledgeBaseController.getArticle);
 
-router.get('/articles', authenticateToken, knowledgeBaseController.getArticles);
+router.get('/articles', authenticateToken, requireStaffOrAdmin, knowledgeBaseController.getArticles);
 router.get('/insights', authenticateToken, requireStaffOrAdmin, knowledgeBaseController.getKnowledgeInsights);
 router.get('/suggestions/tickets/:ticketId', authenticateToken, requireStaffOrAdmin, knowledgeBaseController.getTicketSuggestions);
-router.get('/articles/:idOrSlug', authenticateToken, knowledgeBaseController.getArticle);
+router.get('/articles/:idOrSlug', authenticateToken, requireStaffOrAdmin, knowledgeBaseController.getArticle);
 router.post('/articles', authenticateToken, requireStaffOrAdmin, knowledgeBaseController.createArticle);
 router.post('/materials/upload', authenticateToken, requireStaffOrAdmin, upload.single('file'), knowledgeBaseController.uploadArticleMaterial);
 router.put('/articles/:id', authenticateToken, requireStaffOrAdmin, knowledgeBaseController.updateArticle);

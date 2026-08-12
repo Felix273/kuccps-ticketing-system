@@ -4,7 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const ticketController = require('../controllers/ticketController');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requireStaffOrAdmin } = require('../middleware/auth');
+const { requirePublicApiKey } = require('../middleware/security');
 
 const uploadDir = path.join(__dirname, '../../uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
@@ -32,21 +33,25 @@ const upload = multer({
 });
 
 // Public route - create ticket (for Google Addon)
-router.post('/public/tickets', ticketController.createTicket);
+router.post('/public/tickets', requirePublicApiKey, ticketController.createTicket);
 
 // Protected routes - require authentication
-router.post("/", authenticateToken, (req, res) => {
+router.use(authenticateToken);
+router.use(requireStaffOrAdmin);
+
+router.post("/", (req, res) => {
   res.status(403).json({
     success: false,
     message: 'Tickets must be generated from requester email intake. Manual staff ticket creation is disabled.'
   });
 });
-router.get('/', authenticateToken, ticketController.getAllTickets);
-router.get('/statistics', authenticateToken, ticketController.getStatistics);
-router.get('/:id', authenticateToken, ticketController.getTicketById);
-router.put('/:id', authenticateToken, ticketController.updateTicket);
-router.post('/:id/comments', authenticateToken, ticketController.addComment);
-router.post('/:id/attachments', authenticateToken, upload.single('file'), ticketController.addAttachment);
+router.get('/', ticketController.getAllTickets);
+router.get('/statistics', ticketController.getStatistics);
+router.get('/:id', ticketController.getTicketById);
+router.put('/:id', ticketController.updateTicket);
+router.post('/:id/escalate', ticketController.escalateTicket);
+router.post('/:id/comments', ticketController.addComment);
+router.post('/:id/attachments', upload.single('file'), ticketController.addAttachment);
 
 // Note: We don't have a delete function yet, so commenting this out
 // If you need to add delete functionality later, add it to the controller first

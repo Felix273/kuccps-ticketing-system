@@ -20,6 +20,10 @@ export const ticketService = {
   async updateStatus(id, status) {
     return api.put(`/tickets/${id}`, { status });
   },
+
+  async startWorking(id, userId) {
+    return api.put(`/tickets/${id}`, { status: 'In Progress', assignedToId: userId });
+  },
   
   async delete(id) {
     return api.delete(`/tickets/${id}`);
@@ -31,6 +35,10 @@ export const ticketService = {
   
   async assign(ticketId, userId) {
     return api.put(`/tickets/${ticketId}`, { assignedToId: userId });
+  },
+
+  async escalate(ticketId, escalation) {
+    return api.post(`/tickets/${ticketId}/escalate`, escalation);
   },
   
   async addComment(ticketId, comment) {

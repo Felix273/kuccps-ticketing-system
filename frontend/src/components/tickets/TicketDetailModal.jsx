@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Mail, Calendar, User, Clock, AlertCircle, CheckCircle, Tag, Building2, MessageSquare, Send, Paperclip, Check, XCircle, PlayCircle, RotateCcw, ChevronDown, ChevronRight, ShieldCheck, Sparkles, BookOpen } from 'lucide-react';
+import { X, Mail, Calendar, User, Clock, AlertCircle, CheckCircle, Tag, Building2, MessageSquare, Send, Paperclip, Check, XCircle, PlayCircle, RotateCcw, ChevronDown, ChevronRight, ShieldCheck, Sparkles, BookOpen, ArrowUpRight } from 'lucide-react';
 import { ticketService } from '../../services/ticketService';
 import { knowledgeBaseService } from '../../services/knowledgeBaseService';
 
-export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
+export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, users = [] }) => {
   const [activeTab, setActiveTab] = useState('details');
   const [replyText, setReplyText] = useState('');
   const [isInternal, setIsInternal] = useState(false);
@@ -13,6 +13,11 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
   const [isUpdating, setIsUpdating] = useState(false);
   const [suggestions, setSuggestions] = useState(null);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [showEscalation, setShowEscalation] = useState(false);
+  const [escalationType, setEscalationType] = useState('horizontal');
+  const [targetUserId, setTargetUserId] = useState('');
+  const [escalationReason, setEscalationReason] = useState('');
+  const [isEscalating, setIsEscalating] = useState(false);
 
   useEffect(() => {
     const loadSuggestions = async () => {
@@ -67,7 +72,9 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
 
     setIsUpdating(true);
     try {
-      const result = await ticketService.updateStatus(ticket.id, newStatus);
+      const result = newStatus === 'In Progress' && currentUser?.id
+        ? await ticketService.startWorking(ticket.id, currentUser.id)
+        : await ticketService.updateStatus(ticket.id, newStatus);
       if (result.success) {
         alert(`Ticket status updated to ${newStatus}`);
         if (onUpdate) {
@@ -82,6 +89,35 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
       alert('Failed to update ticket status');
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const handleEscalate = async () => {
+    if (!targetUserId) {
+      alert('Please choose an officer to escalate to.');
+      return;
+    }
+
+    setIsEscalating(true);
+    try {
+      const result = await ticketService.escalate(ticket.id, {
+        targetUserId,
+        escalationType,
+        reason: escalationReason
+      });
+
+      if (result.success) {
+        alert('Ticket escalated successfully');
+        if (onUpdate) await onUpdate();
+        onClose();
+      } else {
+        alert(result.message || 'Failed to escalate ticket');
+      }
+    } catch (error) {
+      console.error('Escalation failed:', error);
+      alert('Failed to escalate ticket');
+    } finally {
+      setIsEscalating(false);
     }
   };
 
@@ -220,6 +256,11 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
   };
 
   const statusActions = getStatusActions();
+  const escalationTargets = users.filter(user =>
+    user.role !== 'user' &&
+    user.id !== currentUser?.id &&
+    !['Resolved', 'Closed'].includes(ticket.status)
+  );
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -357,6 +398,50 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
                         ))}
                       </ul>
                     </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="bg-white rounded-lg border border-indigo-100 p-3">
+                        <h4 className="font-semibold text-gray-900 mb-2">Missing Details</h4>
+                        {suggestions.missingInfo?.length > 0 ? (
+                          <ul className="space-y-1">
+                            {suggestions.missingInfo.map(item => (
+                              <li key={item} className="text-sm text-gray-700 flex gap-2">
+                                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                                <span>{item}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-sm text-gray-600">Basic triage details look sufficient.</p>
+                        )}
+                      </div>
+                      <div className="bg-white rounded-lg border border-indigo-100 p-3">
+                        <h4 className="font-semibold text-gray-900 mb-2">Priority Check</h4>
+                        <p className="text-sm text-gray-700">
+                          Current: <span className="font-semibold">{suggestions.priorityAssessment?.current || ticket.priority}</span>
+                        </p>
+                        <p className="text-sm text-gray-700">
+                          Suggested: <span className="font-semibold">{suggestions.priorityAssessment?.suggested || ticket.priority}</span>
+                        </p>
+                        {suggestions.priorityAssessment?.shouldReview && (
+                          <p className="text-xs text-amber-700 mt-2">Review priority before continuing.</p>
+                        )}
+                      </div>
+                      <div className="bg-white rounded-lg border border-indigo-100 p-3">
+                        <h4 className="font-semibold text-gray-900 mb-2">Similar Active Tickets</h4>
+                        {suggestions.similarTickets?.length > 0 ? (
+                          <div className="space-y-2">
+                            {suggestions.similarTickets.slice(0, 3).map(item => (
+                              <div key={item.ticketNumber} className="text-sm">
+                                <p className="font-semibold text-gray-900">{item.ticketNumber}</p>
+                                <p className="text-gray-600 truncate">{item.subject}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-600">No likely duplicate active ticket found.</p>
+                        )}
+                      </div>
+                    </div>
                     {suggestions.articles.length > 0 && (
                       <div>
                         <h4 className="font-semibold text-gray-900 mb-2">Related knowledge</h4>
@@ -430,6 +515,68 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
                       </div>
                     )}
                   </div>
+                </div>
+
+                {/* Escalation */}
+                <div className="bg-white rounded-xl p-4 border-2 border-gray-200">
+                  <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                    <ArrowUpRight className="w-4 h-4 text-[#911414]" />
+                    Escalation
+                  </h4>
+                  {!showEscalation ? (
+                    <button
+                      onClick={() => setShowEscalation(true)}
+                      disabled={['Resolved', 'Closed'].includes(ticket.status)}
+                      className="w-full px-4 py-2 bg-[#911414] text-white rounded-lg hover:bg-[#ac0807] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Escalate Ticket
+                    </button>
+                  ) : (
+                    <div className="space-y-3">
+                      <select
+                        value={escalationType}
+                        onChange={(e) => setEscalationType(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#911414] focus:border-transparent"
+                      >
+                        <option value="horizontal">Horizontal - Peer Officer</option>
+                        <option value="vertical">Vertical - Senior Officer</option>
+                      </select>
+                      <select
+                        value={targetUserId}
+                        onChange={(e) => setTargetUserId(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#911414] focus:border-transparent"
+                      >
+                        <option value="">Select officer</option>
+                        {escalationTargets.map(user => (
+                          <option key={user.id} value={user.id}>
+                            {user.name} {user.department?.name ? `- ${user.department.name}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <textarea
+                        value={escalationReason}
+                        onChange={(e) => setEscalationReason(e.target.value)}
+                        rows={3}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#911414] focus:border-transparent resize-none"
+                        placeholder="Reason for escalation"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleEscalate}
+                          disabled={isEscalating || !targetUserId}
+                          className="flex-1 px-4 py-2 bg-[#911414] text-white rounded-lg hover:bg-[#ac0807] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isEscalating ? 'Escalating...' : 'Confirm'}
+                        </button>
+                        <button
+                          onClick={() => setShowEscalation(false)}
+                          className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Timestamps */}
@@ -591,12 +738,12 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
                 <div className="bg-gray-50 rounded-xl p-6 border-2 border-gray-200 sticky bottom-0">
                   <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                     {isInternal ? <ShieldCheck className="w-5 h-5 text-amber-600" /> : <Send className="w-5 h-5 text-[#911414]" />}
-                    {isInternal ? 'Internal note' : `Reply to ${ticket.requesterEmail}`}
+                    {isInternal ? 'Internal note' : `Public update to ${ticket.requesterEmail}`}
                   </h4>
                   <textarea
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value)}
-                    placeholder={isInternal ? 'Add a private note for agents...' : 'Type your reply here...'}
+                    placeholder={isInternal ? 'Add a private note for agents...' : 'Type the update to send to the requester...'}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#911414] focus:border-transparent resize-none"
                     rows={4}
                   />
@@ -631,7 +778,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate }) => {
                       className="px-6 py-2 bg-gradient-to-r from-[#911414] to-[#d20001] text-white rounded-lg hover:from-[#ac0807] hover:to-[#911414] font-medium transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
                       <Send className="w-4 h-4" />
-                      {isSending ? 'Saving...' : isInternal ? 'Save Note' : 'Send Reply'}
+                      {isSending ? 'Saving...' : isInternal ? 'Save Note' : 'Send Update'}
                     </button>
                   </div>
                 </div>

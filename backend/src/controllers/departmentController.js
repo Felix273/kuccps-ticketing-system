@@ -8,7 +8,7 @@ exports.getAllDepartments = async (req, res) => {
     const departments = await prisma.department.findMany({
       include: {
         _count: {
-          select: { tickets: true }
+          select: { tickets: true, users: true }
         }
       },
       orderBy: {
@@ -39,7 +39,7 @@ exports.getDepartmentById = async (req, res) => {
       where: { id: id },
       include: {
         _count: {
-          select: { tickets: true }
+          select: { tickets: true, users: true }
         }
       }
     });
@@ -194,7 +194,7 @@ exports.deleteDepartment = async (req, res) => {
       where: { id: id },
       include: {
         _count: {
-          select: { tickets: true }
+          select: { tickets: true, users: true }
         }
       }
     });
@@ -206,11 +206,11 @@ exports.deleteDepartment = async (req, res) => {
       });
     }
 
-    // Check if department has any tickets
-    if (department._count.tickets > 0) {
+    // Check if department has any tickets or users
+    if (department._count.tickets > 0 || department._count.users > 0) {
       return res.status(400).json({
         success: false,
-        message: `Cannot delete department with ${department._count.tickets} active tickets. Please reassign or close tickets first.`
+        message: `Cannot delete department with ${department._count.tickets} ticket(s) and ${department._count.users} user(s). Please reassign them first.`
       });
     }
 

@@ -72,18 +72,27 @@ if (values.NODE_ENV === 'production') {
   check(values.REQUIRE_PUBLIC_TICKET_API_KEY === 'true', 'REQUIRE_PUBLIC_TICKET_API_KEY must be true in production.');
   warn(values.FRONTEND_URL && !values.FRONTEND_URL.includes('localhost'), 'FRONTEND_URL should be the production HTTPS frontend URL.');
   warn(values.CORS_ORIGINS || values.FRONTEND_URL, 'Set CORS_ORIGINS or FRONTEND_URL for production.');
+  check(values.ALLOW_PUBLIC_API_KEY_IN_BODY !== 'true', 'ALLOW_PUBLIC_API_KEY_IN_BODY must not be true in production.');
+  check(!String(values.LDAP_URL || '').startsWith('ldap://'), 'Use LDAPS, not LDAP, in production.');
+  check(values.LDAP_TLS_REJECT_UNAUTHORIZED !== 'false', 'LDAP_TLS_REJECT_UNAUTHORIZED must not be false in production.');
+  check(values.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false', 'SMTP_TLS_REJECT_UNAUTHORIZED must not be false in production.');
+  check(values.IMAP_TLS_REJECT_UNAUTHORIZED !== 'false', 'IMAP_TLS_REJECT_UNAUTHORIZED must not be false in production.');
 }
 
 warn(!String(values.CORS_ORIGINS || '').includes('*'), 'CORS_ORIGINS should not contain wildcard origins.');
+warn(!String(values.FRONTEND_URL || '').includes('localhost'), 'FRONTEND_URL still points to localhost.');
 warn(hasValue(values.EMAIL_USER) || hasValue(values.SMTP_USER), 'SMTP username is not configured; outbound email may fail.');
 warn(hasValue(values.EMAIL_PASSWORD) || hasValue(values.SMTP_PASSWORD), 'SMTP password/app password is not configured; outbound email may fail.');
 warn(hasValue(values.SUPPORT_EMAIL), 'SUPPORT_EMAIL is not configured; ticket emails may fall back to the SMTP username.');
 
 if (values.USE_LDAP_AUTH === 'true') {
-  ['LDAP_URL', 'LDAP_BIND_DN', 'LDAP_BIND_PASSWORD', 'LDAP_SEARCH_BASE'].forEach(key => {
+  ['LDAP_URL', 'LDAP_BIND_DN', 'LDAP_BIND_PASSWORD', 'LDAP_BASE_DN'].forEach(key => {
     check(hasValue(values[key]), `${key} is required when USE_LDAP_AUTH=true.`);
   });
 }
+
+const nodeMajor = Number(process.versions.node.split('.')[0]);
+warn(nodeMajor >= 22, `Node ${process.versions.node} is below the recommended production runtime v22.x.`);
 
 if (failures.length > 0) {
   console.error('Preflight failed:');

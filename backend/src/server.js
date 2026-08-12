@@ -8,18 +8,20 @@ const userRoutes = require('./routes/users');
 const publicTicketRoutes = require('./routes/publicTickets');
 const { startEmailMonitoring } = require('./services/emailService');
 const { PrismaClient } = require('@prisma/client');
-const { requestId, securityHeaders, rateLimit } = require('./middleware/security');
+const { requestId, securityHeaders, rateLimit, validateProductionConfig } = require('./middleware/security');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const prisma = new PrismaClient();
+
+validateProductionConfig();
 
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(requestId);
 app.use(securityHeaders);
 
-const allowedOrigins = (process.env.CORS_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:5173')
+const allowedOrigins = (process.env.CORS_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:5173,http://localhost:5174')
   .split(',')
   .map(origin => origin.trim())
   .filter(Boolean);
@@ -68,6 +70,23 @@ app.get('/health', async (req, res) => {
     // Fallback to default if database error
     res.json({ status: 'OK', message: 'KUCCPS Ticketing System API is running' });
   }
+});
+
+app.use((err, req, res, next) => {
+  if (err?.message === 'CORS origin denied') {
+    return res.status(403).json({ success: false, message: 'CORS origin denied' });
+  }
+
+  if (err?.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ success: false, message: 'Uploaded file is too large' });
+  }
+
+  if (err?.message === 'File type is not allowed') {
+    return res.status(415).json({ success: false, message: err.message });
+  }
+
+  console.error('Unhandled request error:', { requestId: req.id, message: err.message });
+  return res.status(500).json({ success: false, message: 'Server error' });
 });
 
 // Start server

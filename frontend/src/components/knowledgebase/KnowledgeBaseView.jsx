@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Book, Search, FileText, HelpCircle, TrendingUp, Clock, Plus, ThumbsUp, Upload, Sparkles } from 'lucide-react';
+import { Book, Search, FileText, HelpCircle, TrendingUp, Clock, Plus, ThumbsUp, Upload, Sparkles, AlertTriangle, Lightbulb, Gauge } from 'lucide-react';
 import { knowledgeBaseService } from '../../services/knowledgeBaseService';
 import { ISSUE_CATEGORIES } from '../../utils/constants';
 import { authService } from '../../services/authService';
+import { operationsService } from '../../services/operationsService';
 
 export const KnowledgeBaseView = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -14,6 +15,7 @@ export const KnowledgeBaseView = () => {
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadMeta, setUploadMeta] = useState({ title: '', category: ISSUE_CATEGORIES[0], tags: 'uploaded-material' });
   const [insights, setInsights] = useState(null);
+  const [operationsInsights, setOperationsInsights] = useState(null);
   const [draft, setDraft] = useState({
     title: '',
     category: ISSUE_CATEGORIES[0],
@@ -30,6 +32,7 @@ export const KnowledgeBaseView = () => {
     const timer = setTimeout(() => {
       loadArticles();
       loadInsights();
+      loadOperationsInsights();
     }, 0);
     return () => clearTimeout(timer);
   }, []);
@@ -53,6 +56,15 @@ export const KnowledgeBaseView = () => {
       if (response.success) setInsights(response.insights);
     } catch (error) {
       console.warn('Knowledge insights unavailable:', error.message);
+    }
+  };
+
+  const loadOperationsInsights = async () => {
+    try {
+      const response = await operationsService.getDashboardAnalytics();
+      if (response.success) setOperationsInsights(response.analytics?.aiInsights || null);
+    } catch (error) {
+      console.warn('Operational insights unavailable:', error.message);
     }
   };
 
@@ -176,6 +188,101 @@ export const KnowledgeBaseView = () => {
         )}
       </div>
 
+      {operationsInsights && (
+        <div className="bg-white rounded-xl shadow-lg border-2 border-indigo-100 p-6">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <Sparkles className="w-6 h-6 text-indigo-700" />
+                AI Operational Insights
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Generated {new Date(operationsInsights.generatedAt).toLocaleString()}
+              </p>
+            </div>
+            <div className="inline-flex w-fit items-center gap-2 px-3 py-2 rounded-lg bg-indigo-50 text-indigo-800 text-sm font-semibold">
+              <Gauge className="w-4 h-4" />
+              {operationsInsights.slaRisk?.overdue || 0} overdue
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-5">
+            {(operationsInsights.executiveSummary || []).map((item, index) => (
+              <div key={index} className="rounded-lg border border-indigo-100 bg-indigo-50 p-4">
+                <p className="text-sm font-medium text-indigo-950">{item}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div className="rounded-lg border border-gray-200 p-4">
+              <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600" />
+                SLA Risk
+              </h3>
+              <div className="space-y-3">
+                {(operationsInsights.slaRisk?.highestRiskTickets || []).slice(0, 5).map(ticket => (
+                  <div key={ticket.ticketNumber} className="text-sm border-b border-gray-100 pb-2 last:border-0">
+                    <div className="flex justify-between gap-3">
+                      <span className="font-semibold text-gray-900">{ticket.ticketNumber}</span>
+                      <span className={ticket.isOverdue ? 'text-red-600 font-semibold' : 'text-amber-600 font-semibold'}>
+                        {ticket.isOverdue ? 'Overdue' : `${ticket.ageHours}h old`}
+                      </span>
+                    </div>
+                    <p className="text-gray-600 truncate">{ticket.subject}</p>
+                    <p className="text-xs text-gray-500">{ticket.priority} • {ticket.assignedTo}</p>
+                  </div>
+                ))}
+                {(operationsInsights.slaRisk?.highestRiskTickets || []).length === 0 && (
+                  <p className="text-sm text-gray-500">No immediate SLA risk detected.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 p-4">
+              <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-[#911414]" />
+                Recurring Patterns
+              </h3>
+              <div className="space-y-3">
+                {(operationsInsights.recurringIssues || []).slice(0, 5).map(item => (
+                  <div key={item.category} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-gray-700">{item.category}</span>
+                    <span className="font-semibold text-[#911414] flex-shrink-0">{item.count} ({item.percentage}%)</span>
+                  </div>
+                ))}
+              </div>
+              {(operationsInsights.duplicateSignals || []).length > 0 && (
+                <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 p-3">
+                  <p className="text-sm font-semibold text-amber-900">
+                    {operationsInsights.duplicateSignals.length} possible duplicate cluster(s)
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-gray-200 p-4">
+              <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                <Lightbulb className="w-4 h-4 text-emerald-600" />
+                Recommended Actions
+              </h3>
+              <div className="space-y-3">
+                {(operationsInsights.escalationRecommendations || []).slice(0, 4).map(item => (
+                  <div key={`${item.ticketNumber}-${item.reason}`} className="text-sm border-b border-gray-100 pb-2 last:border-0">
+                    <p className="font-semibold text-gray-900">{item.ticketNumber}</p>
+                    <p className="text-gray-600">{item.reason}</p>
+                    <p className="text-emerald-700 mt-1">{item.recommendation}</p>
+                  </div>
+                ))}
+                {(operationsInsights.escalationRecommendations || []).length === 0 && (
+                  <p className="text-sm text-gray-500">No escalation recommendation right now.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {insights && (
         <div className="bg-indigo-50 rounded-xl p-6 border-2 border-indigo-200">
           <h2 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
@@ -217,6 +324,42 @@ export const KnowledgeBaseView = () => {
                     {item.term} ({item.count})
                   </span>
                 ))}
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div className="bg-white rounded-lg p-4 border border-indigo-100">
+              <h3 className="font-semibold text-gray-900 mb-2">Knowledge Gaps</h3>
+              <div className="space-y-2">
+                {(insights.knowledgeGaps || []).slice(0, 5).map(item => (
+                  <div key={item.category} className="text-sm border-b border-gray-100 pb-2 last:border-0">
+                    <div className="flex justify-between gap-3">
+                      <span className="font-medium text-gray-900">{item.category}</span>
+                      <span className="text-indigo-700 font-semibold">{item.tickets} tickets / {item.articles} articles</span>
+                    </div>
+                    <p className="text-gray-600">{item.recommendation}</p>
+                  </div>
+                ))}
+                {(!insights.knowledgeGaps || insights.knowledgeGaps.length === 0) && (
+                  <p className="text-sm text-gray-500">No urgent article gaps detected.</p>
+                )}
+              </div>
+            </div>
+            <div className="bg-white rounded-lg p-4 border border-indigo-100">
+              <h3 className="font-semibold text-gray-900 mb-2">Article Effectiveness</h3>
+              <div className="space-y-2">
+                {(insights.articleEffectiveness || []).slice(0, 5).map(article => (
+                  <div key={article.title} className="flex justify-between gap-3 text-sm">
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-900 truncate">{article.title}</p>
+                      <p className="text-xs text-gray-500">{article.category}</p>
+                    </div>
+                    <span className="text-indigo-700 font-semibold flex-shrink-0">{article.views} views</span>
+                  </div>
+                ))}
+                {(!insights.articleEffectiveness || insights.articleEffectiveness.length === 0) && (
+                  <p className="text-sm text-gray-500">Article usage will appear after staff begin viewing and rating content.</p>
+                )}
               </div>
             </div>
           </div>
