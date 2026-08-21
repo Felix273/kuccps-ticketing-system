@@ -1,11 +1,11 @@
 /**
  * KUCCPS IT Ticketing System - Google Workspace Add-on
- * Creates backend tickets from Gmail.
+ * Creates backend tickets and captures CSAT feedback directly from Gmail.
  */
 
 const DEFAULT_CONFIG = {
-  API_URL: 'https://store-town-icq-substantially.trycloudflare.com/api/public/tickets',
-  SUPPORT_EMAIL: 'emmanuel.kitanga@kuccps.ac.ke',
+  API_URL: 'https://store-town-icq-substantially.trycloudflare.com/api',
+  SUPPORT_EMAIL: 'itsupport@kuccps.ac.ke',
   BACKEND_API_KEY: ''
 };
 
@@ -23,44 +23,82 @@ const ISSUE_CATEGORIES = [
 const PRIORITY_LEVELS = ['Low', 'Medium', 'High', 'Critical'];
 
 function onHomepage() {
-  return createTicketCard();
+  return createMainCard();
 }
 
-function onGmailOpen() {
-  return createTicketCard();
+function onGmailOpen(e) {
+  return createMainCard(e);
 }
 
 function onComposeOpen() {
-  return createTicketCard();
+  return createMainCard();
 }
 
 function getConfig() {
   const properties = PropertiesService.getScriptProperties();
 
+  let baseUrl = cleanProperty(properties.getProperty('API_URL')) || DEFAULT_CONFIG.API_URL;
+  baseUrl = baseUrl.replace(/\/public\/tickets\/?$/i, '').replace(/\/+$/, '');
+
   return {
-    API_URL: cleanProperty(properties.getProperty('API_URL')) || DEFAULT_CONFIG.API_URL,
+    BASE_URL: baseUrl,
+    PUBLIC_TICKET_URL: baseUrl + '/public/tickets',
+    MY_TICKETS_URL: baseUrl + '/tickets/public/my-tickets',
+    CSAT_URL: baseUrl + '/operations/csat/public',
     SUPPORT_EMAIL: cleanProperty(properties.getProperty('SUPPORT_EMAIL')) || DEFAULT_CONFIG.SUPPORT_EMAIL,
     BACKEND_API_KEY: cleanProperty(properties.getProperty('BACKEND_API_KEY')) || DEFAULT_CONFIG.BACKEND_API_KEY
   };
 }
 
-function setupProductionProperties() {
-  const properties = PropertiesService.getScriptProperties();
-  const existing = properties.getProperties();
-  const values = {};
+function createMainCard(e) {
+  const userEmail = Session.getActiveUser().getEmail();
+  const config = getConfig();
 
-  if (!existing.API_URL) values.API_URL = DEFAULT_CONFIG.API_URL;
-  if (!existing.SUPPORT_EMAIL) values.SUPPORT_EMAIL = DEFAULT_CONFIG.SUPPORT_EMAIL;
+  // Try to check if user has resolved tickets awaiting CSAT rating
+  const pendingCsatTicket = checkPendingCsatTicket(userEmail, config);
 
-  if (Object.keys(values).length > 0) {
-    properties.setProperties(values, false);
+  if (pendingCsatTicket) {
+    return createCsatRatingCard(pendingCsatTicket);
   }
 
-  Logger.log('Script properties checked. Set values: ' + Object.keys(values).join(', '));
+  return createTicketFormCard(userEmail, config);
 }
 
-function createTicketCard() {
-  const config = getConfig();
+function checkPendingCsatTicket(userEmail, config) {
+  try {
+    if (!config.MY_TICKETS_URL || !userEmail) return null;
+
+    const headers = {};
+    if (config.BACKEND_API_KEY) {
+      headers['X-API-Key'] = config.BACKEND_API_KEY;
+      headers.Authorization = 'Bearer ' + config.BACKEND_API_KEY;
+    }
+
+    const url = config.MY_TICKETS_URL + '?email=' + encodeURIComponent(userEmail);
+    const options = {
+      method: 'get',
+      headers: headers,
+      muteHttpExceptions: true
+    };
+
+    const response = UrlFetchApp.fetch(url, options);
+    if (response.getResponseCode() === 200) {
+      const parsed = JSON.parse(response.getContentText());
+      if (parsed.success && parsed.tickets && parsed.tickets.length > 0) {
+        // Find a resolved ticket without CSAT rating
+        const resolvedTicket = parsed.tickets.find(function(t) {
+          return (t.status === 'Resolved' || t.status === 'Closed') && !t.csatRated;
+        });
+        return resolvedTicket || null;
+      }
+    }
+  } catch (err) {
+    Logger.log('Error checking pending CSAT ticket: ' + err);
+  }
+  return null;
+}
+
+function createTicketFormCard(userEmail, config) {
   const card = CardService.newCardBuilder();
 
   const header = CardService.newCardHeader()
@@ -71,7 +109,6 @@ function createTicketCard() {
 
   card.setHeader(header);
 
-  const userEmail = Session.getActiveUser().getEmail();
   const section = CardService.newCardSection();
 
   section.addWidget(
@@ -131,8 +168,82 @@ function createTicketCard() {
 
   section.addWidget(
     CardService.newTextParagraph()
-      .setText('<font color="#6b7280"><i>Your ticket will be created in the IT ticketing system. Updates will be sent from ' + escapeHtml(config.SUPPORT_EMAIL) + '.</i></font>')
+      .setText('<font color="#6b7280"><i>Updates will be sent from ' + escapeHtml(config.SUPPORT_EMAIL) + '.</i></font>')
   );
+
+  card.addSection(section);
+  return card.build();
+}
+
+function createCsatRatingCard(ticket) {
+  const card = CardService.newCardBuilder();
+
+  const header = CardService.newCardHeader()
+    .setTitle('Service Satisfaction Survey')
+    .setSubtitle('Ticket #' + ticket.ticketNumber + ' Resolved')
+    .setImageUrl('https://careers.kuccps.net/Images/KUCCPS-Logo.png')
+    .setImageStyle(CardService.ImageStyle.SQUARE);
+
+  card.setHeader(header);
+
+  const section = CardService.newCardSection();
+
+  section.addWidget(
+    CardService.newTextParagraph()
+      .setText('Your IT support request <b>"' + escapeHtml(ticket.subject) + '"</b> was recently marked as <b>Resolved</b>.')
+  );
+
+  section.addWidget(
+    CardService.newTextParagraph()
+      .setText('Please rate your satisfaction with the support offered:')
+  );
+
+  section.addWidget(CardService.newDivider());
+
+  // Hidden ticket ID parameter
+  section.addWidget(
+    CardService.newTextInput()
+      .setFieldName('ticketId')
+      .setTitle('Ticket ID')
+      .setValue(ticket.id)
+      .setMultiline(false)
+  );
+
+  const ratingDropdown = CardService.newSelectionInput()
+    .setType(CardService.SelectionInputType.DROPDOWN)
+    .setTitle('Satisfaction Rating')
+    .setFieldName('rating');
+
+  ratingDropdown.addItem('⭐⭐⭐⭐⭐ 5 Stars - Extremely Contented', '5', true);
+  ratingDropdown.addItem('⭐⭐⭐⭐ 4 Stars - Contented', '4', false);
+  ratingDropdown.addItem('⭐⭐⭐ 3 Stars - Satisfied (Good)', '3', false);
+  ratingDropdown.addItem('⭐⭐ 2 Stars - Discontented (Needs Improvement)', '2', false);
+  ratingDropdown.addItem('⭐ 1 Star - Very Discontented', '1', false);
+
+  section.addWidget(ratingDropdown);
+
+  section.addWidget(
+    CardService.newTextInput()
+      .setFieldName('comment')
+      .setTitle('Feedback / Comments (Optional)')
+      .setHint('Share your thoughts or suggestions regarding this service')
+      .setMultiline(true)
+  );
+
+  section.addWidget(CardService.newDivider());
+
+  const submitCsatButton = CardService.newTextButton()
+    .setText('Submit Rating')
+    .setOnClickAction(CardService.newAction().setFunctionName('submitCsatFeedback'))
+    .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+    .setBackgroundColor('#911414');
+
+  const skipButton = CardService.newTextButton()
+    .setText('Skip for now / New Ticket')
+    .setOnClickAction(CardService.newAction().setFunctionName('onHomepage'))
+    .setTextButtonStyle(CardService.TextButtonStyle.TEXT);
+
+  section.addWidget(CardService.newButtonSet().addButton(submitCsatButton).addButton(skipButton));
 
   card.addSection(section);
   return card.build();
@@ -156,7 +267,7 @@ function submitTicket(e) {
       priority: formInput.priority || 'Medium'
     };
 
-    const response = submitToBackend(ticketData, config);
+    const response = submitToBackend(ticketData, config.PUBLIC_TICKET_URL, config);
 
     if (response.success) {
       return createSuccessCard(
@@ -171,14 +282,73 @@ function submitTicket(e) {
   }
 }
 
-function submitToBackend(ticketData, config) {
+function submitCsatFeedback(e) {
   try {
-    if (!/^https?:\/\//i.test(config.API_URL)) {
-      throw new Error('Backend URL is invalid. Check API_URL in Script Properties.');
+    const config = getConfig();
+    const formInput = e.formInput || {};
+    const userEmail = Session.getActiveUser().getEmail();
+
+    const rating = parseInt(formInput.rating, 10) || 5;
+    const comment = formInput.comment ? String(formInput.comment).trim() : '';
+    const ticketId = formInput.ticketId;
+
+    if (!ticketId) {
+      return createErrorCard('Ticket ID is missing.');
+    }
+
+    const payload = {
+      ticketId: ticketId,
+      rating: rating,
+      comment: comment,
+      requesterEmail: userEmail
+    };
+
+    const response = submitToBackend(payload, config.CSAT_URL, config);
+
+    if (response.success) {
+      const card = CardService.newCardBuilder();
+      const header = CardService.newCardHeader()
+        .setTitle('Thank You!')
+        .setSubtitle('Feedback Submitted')
+        .setImageUrl('https://careers.kuccps.net/Images/KUCCPS-Logo.png');
+      card.setHeader(header);
+
+      const section = CardService.newCardSection();
+      const statusText = rating >= 3
+        ? 'Thank you for your positive feedback! We are glad to serve you.'
+        : 'Thank you for your feedback. We regret that the service did not meet your expectations and our ICT supervisor has been alerted to review this.';
+
+      section.addWidget(CardService.newTextParagraph().setText('<b>' + statusText + '</b>'));
+      section.addWidget(CardService.newDivider());
+
+      const newTicketButton = CardService.newTextButton()
+        .setText('Create New Ticket')
+        .setOnClickAction(CardService.newAction().setFunctionName('onHomepage'))
+        .setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setBackgroundColor('#911414');
+
+      section.addWidget(CardService.newButtonSet().addButton(newTicketButton));
+      card.addSection(section);
+
+      return CardService.newActionResponseBuilder()
+        .setNavigation(CardService.newNavigation().updateCard(card.build()))
+        .build();
+    }
+
+    return createErrorCard('Failed to save rating: ' + (response.message || 'Unknown error'));
+  } catch (error) {
+    Logger.log('Error submitting CSAT: ' + error);
+    return createErrorCard('An error occurred while submitting feedback.');
+  }
+}
+
+function submitToBackend(data, url, config) {
+  try {
+    if (!/^https?:\/\//i.test(url)) {
+      throw new Error('Backend URL is invalid.');
     }
 
     const headers = {};
-
     if (config.BACKEND_API_KEY) {
       headers['X-API-Key'] = config.BACKEND_API_KEY;
       headers.Authorization = 'Bearer ' + config.BACKEND_API_KEY;
@@ -188,17 +358,13 @@ function submitToBackend(ticketData, config) {
       method: 'post',
       contentType: 'application/json',
       headers: headers,
-      payload: JSON.stringify(ticketData),
+      payload: JSON.stringify(data),
       muteHttpExceptions: true
     };
 
-    const response = UrlFetchApp.fetch(config.API_URL, options);
+    const response = UrlFetchApp.fetch(url, options);
     const statusCode = response.getResponseCode();
     const responseText = response.getContentText();
-
-    Logger.log('Backend URL: ' + config.API_URL);
-    Logger.log('Backend status: ' + statusCode);
-    Logger.log('Backend response: ' + responseText);
 
     let parsed;
     try {
@@ -270,7 +436,7 @@ function createErrorCard(errorMessage) {
   const card = CardService.newCardBuilder();
 
   const header = CardService.newCardHeader()
-    .setTitle('Ticket Submission Failed')
+    .setTitle('Submission Failed')
     .setImageUrl('https://careers.kuccps.net/Images/KUCCPS-Logo.png')
     .setImageStyle(CardService.ImageStyle.SQUARE);
 

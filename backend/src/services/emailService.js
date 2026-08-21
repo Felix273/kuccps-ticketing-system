@@ -181,7 +181,9 @@ async function sendEmail(to, templateType, data) {
       '[NOREPLY_EMAIL]': settings.noreplyEmail || settings.supportEmail || 'noreply@kuccps.ac.ke',
       '{{noreplyEmail}}': settings.noreplyEmail || settings.supportEmail || 'noreply@kuccps.ac.ke',
       '{{primaryColor}}': settings.primaryColor || '#911414',
-      '{{secondaryColor}}': settings.secondaryColor || '#d20001'
+      '{{secondaryColor}}': settings.secondaryColor || '#d20001',
+      '{{ticketId}}': data.id || '',
+      '{{csatRatingUrl}}': `${process.env.FRONTEND_URL || 'https://itsupport.kuccps.ac.ke'}/api/operations/csat/rate`
     };
 
     html = html
