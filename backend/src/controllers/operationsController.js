@@ -24,6 +24,16 @@ function getDepartmentName(ticket) {
   return ticket.department?.name || ticket.assignedTo?.department?.name || 'Unmapped';
 }
 
+function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function buildAiInsights(tickets, users) {
   const now = new Date();
   const activeTickets = tickets.filter(ticket => OPEN_STATUSES.has(ticket.status));
@@ -313,6 +323,185 @@ exports.createCsatResponse = async (req, res) => {
   } catch (error) {
     console.error('Create CSAT response error:', error);
     res.status(500).json({ success: false, message: 'Failed to save CSAT response' });
+  }
+};
+
+exports.createPublicCsatResponse = async (req, res) => {
+  try {
+    const { ticketId, rating, comment } = req.body;
+    const numericRating = Number(rating);
+    if (!ticketId || !numericRating || numericRating < 1 || numericRating > 5) {
+      if (req.accepts('html')) {
+        return res.status(400).send('<h2>Invalid rating request</h2>');
+      }
+      return res.status(400).json({ success: false, message: 'Ticket ID and valid rating (1-5) are required' });
+    }
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, ticketNumber: true, subject: true }
+    });
+
+    if (!ticket) {
+      if (req.accepts('html')) {
+        return res.status(404).send('<h2>Ticket not found</h2>');
+      }
+      return res.status(404).json({ success: false, message: 'Ticket not found' });
+    }
+
+    // Upsert CSAT response to prevent duplicate entries for the same ticket
+    const existingCsat = await prisma.csatResponse.findFirst({
+      where: { ticketId }
+    });
+
+    let response;
+    if (existingCsat) {
+      response = await prisma.csatResponse.update({
+        where: { id: existingCsat.id },
+        data: {
+          rating: numericRating,
+          comment: comment ? String(comment).trim() : existingCsat.comment
+        }
+      });
+    } else {
+      response = await prisma.csatResponse.create({
+        data: {
+          ticketId,
+          rating: numericRating,
+          comment: comment ? String(comment).trim() : null
+        }
+      });
+    }
+
+    // If request comes from an HTML form submission (content-type application/x-www-form-urlencoded or accepts html)
+    if (req.headers['content-type']?.includes('application/x-www-form-urlencoded') || req.accepts('html')) {
+      const isContented = numericRating >= 3;
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>KUCCPS IT Support - Thank You</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f3f4f6; margin: 0; padding: 40px 20px; text-align: center; }
+            .card { max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+            .header { background: #911414; color: white; padding: 16px; border-radius: 8px; font-weight: bold; font-size: 20px; margin-bottom: 24px; }
+            .message { color: #111827; font-size: 20px; font-weight: bold; margin-bottom: 12px; }
+            .subtext { color: #4b5563; font-size: 15px; margin-bottom: 24px; line-height: 1.5; }
+            .footer { margin-top: 24px; color: #9ca3af; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="header">KUCCPS IT Support</div>
+            <div class="message">${isContented ? 'Thank You for Your Feedback!' : 'Feedback Submitted'}</div>
+            <div class="subtext">
+              Your feedback for ticket <b>${ticket.ticketNumber}</b> has been saved. We appreciate your input as we continuously improve ICT support services for KUCCPS.
+            </div>
+            <div class="footer">KUCCPS IT Ticketing System • Service Desk</div>
+          </div>
+        </body>
+        </html>
+      `;
+      return res.send(html);
+    }
+
+    return res.status(201).json({ success: true, message: 'Rating saved successfully', response });
+  } catch (error) {
+    console.error('Create public CSAT error:', error);
+    if (req.accepts('html')) {
+      return res.status(500).send('<h2>Failed to save feedback</h2>');
+    }
+    return res.status(500).json({ success: false, message: 'Failed to save rating' });
+  }
+};
+
+exports.handleEmailCsatRate = async (req, res) => {
+  try {
+    const { ticketId, rating } = req.query;
+    const numericRating = Number(rating);
+
+    if (!ticketId || !numericRating || numericRating < 1 || numericRating > 5) {
+      return res.status(400).send('<h2>Invalid rating request</h2>');
+    }
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, ticketNumber: true, subject: true }
+    });
+
+    if (!ticket) {
+      return res.status(404).send('<h2>Ticket not found</h2>');
+    }
+
+    // Upsert initial rating to ensure idempotency and prevent duplicate records
+    const existingCsat = await prisma.csatResponse.findFirst({
+      where: { ticketId }
+    });
+
+    if (existingCsat) {
+      await prisma.csatResponse.update({
+        where: { id: existingCsat.id },
+        data: { rating: numericRating }
+      });
+    } else {
+      await prisma.csatResponse.create({
+        data: {
+          ticketId,
+          rating: numericRating
+        }
+      });
+    }
+
+    const isContented = numericRating >= 3;
+    const ratingStars = '⭐'.repeat(numericRating);
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>KUCCPS IT Support - Rating Received</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f3f4f6; margin: 0; padding: 40px 20px; text-align: center; }
+          .card { max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+          .header { background: #911414; color: white; padding: 16px; border-radius: 8px; font-weight: bold; font-size: 20px; margin-bottom: 24px; }
+          .stars { font-size: 32px; margin: 16px 0; }
+          .message { color: #111827; font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+          .subtext { color: #4b5563; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+          textarea { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; margin-bottom: 16px; min-height: 90px; }
+          button { background-color: #911414; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; }
+          button:hover { background-color: #720e0e; }
+          .footer { margin-top: 24px; color: #9ca3af; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="header">KUCCPS IT Support</div>
+          <div class="stars">${ratingStars}</div>
+          <div class="message">${isContented ? 'Thank you for your rating!' : 'Thank you for your feedback'}</div>
+          <div class="subtext">
+            Your rating of <b>${numericRating}/5</b> for ticket <b>${escapeHtml(ticket.ticketNumber)}</b> ("${escapeHtml(ticket.subject)}") has been recorded.
+            ${isContented ? 'We are glad we could assist you!' : 'We regret that the service did not meet your expectations. Our ICT supervisor has been notified.'}
+          </div>
+          <form action="/api/operations/csat/public" method="POST">
+            <input type="hidden" name="ticketId" value="${ticket.id}">
+            <input type="hidden" name="rating" value="${numericRating}">
+            <textarea name="comment" placeholder="Optional: Share any comments or details about your experience..."></textarea>
+            <button type="submit">Submit Comments</button>
+          </form>
+          <div class="footer">KUCCPS IT Ticketing System • Service Desk</div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    res.send(html);
+  } catch (error) {
+    console.error('Handle email CSAT rate error:', error);
+    res.status(500).send('<h2>Failed to record rating</h2>');
   }
 };
 

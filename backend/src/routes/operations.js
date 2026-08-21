@@ -8,5 +8,7 @@ router.get('/sla-policies', authenticateToken, requireStaffOrAdmin, operationsCo
 router.post('/sla-policies', authenticateToken, requireAdmin, operationsController.createSlaPolicy);
 router.put('/sla-policies/:id', authenticateToken, requireAdmin, operationsController.updateSlaPolicy);
 router.post('/csat', authenticateToken, operationsController.createCsatResponse);
+router.get('/csat/rate', operationsController.handleEmailCsatRate);
+router.post('/csat/public', operationsController.createPublicCsatResponse);
 
 module.exports = router;
