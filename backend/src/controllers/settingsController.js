@@ -214,6 +214,35 @@ exports.updateSettings = async (req, res) => {
   }
 };
 
+exports.uploadLogo = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Logo image file is required' });
+    }
+
+    const logoUrl = `/uploads/${req.file.filename}`;
+    let settings = await prisma.systemSettings.findFirst();
+
+    if (!settings) {
+      settings = await prisma.systemSettings.create({
+        data: getInitialEmailSettings()
+      });
+    }
+
+    const updated = await prisma.systemSettings.update({
+      where: { id: settings.id },
+      data: { logoUrl }
+    });
+
+    clearSettingsCache();
+
+    res.json({ success: true, message: 'Logo uploaded successfully', logoUrl, settings: updated });
+  } catch (error) {
+    console.error('Error uploading logo:', error);
+    res.status(500).json({ success: false, message: 'Failed to upload logo image' });
+  }
+};
+
 exports.getPublicSettings = async (req, res) => {
   try {
     let settings = await prisma.systemSettings.findFirst();
