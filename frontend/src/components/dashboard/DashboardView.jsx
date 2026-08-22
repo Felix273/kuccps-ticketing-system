@@ -4,7 +4,6 @@ import { StatCard } from '../layout/StatCard';
 import { QuickStatsCards } from './QuickStatsCards';
 import { TopCategoriesChart } from './TopCategoriesChart';
 import { TicketTrendsChart } from './charts/TicketTrendsChart';
-import { StatusPieChart } from './charts/StatusPieChart';
 import { PriorityChart } from './charts/PriorityChart';
 import { ResponseTimeChart } from './charts/ResponseTimeChart';
 import { VolumeByHourChart } from './charts/VolumeByHourChart';
@@ -18,7 +17,7 @@ import { DepartmentTicketChart } from './charts/DepartmentTicketChart';
 import { ISSUE_CATEGORIES } from '../../utils/constants';
 import { operationsService } from '../../services/operationsService';
 
-export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false, error }) => {
+export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false, error, onNavigateToTickets }) => {
   const [operationsAnalytics, setOperationsAnalytics] = useState(null);
 
   useEffect(() => {
@@ -34,7 +33,6 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
   }, [tickets.length]);
 
   const analytics = useMemo(() => {
-    // Category stats
     const categoryTotal = tickets.length || 0;
     const categoryStats = ISSUE_CATEGORIES.map(cat => {
       const count = tickets.filter(t => t.category === cat).length;
@@ -47,14 +45,12 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
       .filter(c => c.count > 0)
       .sort((a, b) => b.count - a.count);
 
-    // Status stats
     const statusStats = [
       { name: 'Open', value: tickets.filter(t => t.status === 'Open').length },
       { name: 'In Progress', value: tickets.filter(t => t.status === 'In Progress').length },
       { name: 'Resolved', value: tickets.filter(t => t.status === 'Resolved').length }
     ].filter(s => s.value > 0);
 
-    // Priority stats
     const priorityStats = [
       { name: 'Low', value: tickets.filter(t => t.priority === 'Low').length },
       { name: 'Medium', value: tickets.filter(t => t.priority === 'Medium').length },
@@ -62,14 +58,12 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
       { name: 'Critical', value: tickets.filter(t => t.priority === 'Critical').length }
     ].filter(p => p.value > 0);
 
-    // Active vs Resolved
     const activeVsResolved = [
       { name: 'Open', value: tickets.filter(t => t.status === 'Open').length },
       { name: 'In Progress', value: tickets.filter(t => t.status === 'In Progress').length },
       { name: 'Resolved', value: tickets.filter(t => t.status === 'Resolved' || t.status === 'Closed').length }
     ].filter(s => s.value > 0);
 
-    // User Workload - tickets claimed by each user
     const userWorkload = {};
     tickets.forEach(t => {
       if (t.assignedTo) {
@@ -88,24 +82,11 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
       .sort((a, b) => b.total - a.total)
       .slice(0, 10);
 
-    // Top Performers - users who resolved the most tickets
-    const topPerformers = Object.values(userWorkload)
-      .filter(u => u.resolved > 0)
-      .sort((a, b) => b.resolved - a.resolved)
-      .slice(0, 10);
-
-    // Department Performance
     const departmentStats = {};
     tickets.forEach(t => {
       const deptName = t.assignedTo?.department?.name || t.department?.name || 'Unclaimed';
       if (!departmentStats[deptName]) {
-        departmentStats[deptName] = { 
-          department: deptName, 
-          open: 0, 
-          inProgress: 0, 
-          resolved: 0, 
-          total: 0 
-        };
+        departmentStats[deptName] = { department: deptName, open: 0, inProgress: 0, resolved: 0, total: 0 };
       }
       departmentStats[deptName].total++;
       if (t.status === 'Open') departmentStats[deptName].open++;
@@ -134,19 +115,6 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
       .sort((a, b) => b.total - a.total)
       .slice(0, 8);
 
-    // Email domain stats
-    const domainStats = {};
-    tickets.forEach(t => {
-      const email = t.requesterEmail || '';
-      const domain = email.split('@')[1] || 'unknown';
-      domainStats[domain] = (domainStats[domain] || 0) + 1;
-    });
-    const emailDomainData = Object.entries(domainStats)
-      .map(([domain, count]) => ({ domain, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 8);
-
-    // Top requesters
     const requesterStats = {};
     tickets.forEach(t => {
       const email = t.requesterEmail || 'Unknown';
@@ -157,7 +125,6 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    // Claim status
     const assignedCount = tickets.filter(t => t.assignedToId !== null).length;
     const unassignedCount = tickets.filter(t => t.assignedToId === null).length;
     const assignmentData = [
@@ -165,7 +132,6 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
       { name: 'Claimed', value: assignedCount }
     ].filter(a => a.value > 0);
 
-    // Trend data for last 7 days
     const trendData = [];
     for (let i = 6; i >= 0; i--) {
       const date = new Date();
@@ -177,11 +143,10 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
       trendData.push({
         date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         tickets: dayTickets.length,
-        resolved: dayTickets.filter(t => t.status === 'Resolved').length
+        resolved: dayTickets.filter(t => t.status === 'Resolved' || t.status === 'Closed').length
       });
     }
 
-    // Response time data — backed by real ticket responseTime field
     const responseTimeData = trendData.map(d => {
       const dayTicketsWithResponse = tickets.filter(t => {
         const ticketDate = new Date(t.createdAt);
@@ -193,7 +158,6 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
       return { date: d.date, avgResponseTime, target: 24 };
     });
 
-    // Volume by hour
     const volumeByHour = Array.from({ length: 24 }, (_, i) => {
       const hour = i.toString().padStart(2, '0') + ':00';
       const count = tickets.filter(t => {
@@ -203,7 +167,6 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
       return { hour, count };
     }).filter(h => h.count > 0);
 
-    // Resolution rate trend
     const resolutionRate = trendData.map(d => ({
       date: d.date,
       rate: d.tickets > 0 ? Math.round((d.resolved / d.tickets) * 100) : 0
@@ -215,10 +178,8 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
       priorityStats,
       activeVsResolved,
       userWorkloadData,
-      topPerformers,
       departmentTicketData,
       departmentPerformance,
-      emailDomainData,
       topRequesters,
       assignmentData,
       trendData,
@@ -232,8 +193,8 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
     totalTickets: tickets.length,
     openTickets: tickets.filter(t => t.status === 'Open').length,
     inProgressTickets: tickets.filter(t => t.status === 'In Progress').length,
-    resolvedTickets: tickets.filter(t => t.status === 'Resolved').length,
-    criticalTickets: tickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved').length,
+    resolvedTickets: tickets.filter(t => t.status === 'Resolved' || t.status === 'Closed').length,
+    criticalTickets: tickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved' && t.status !== 'Closed').length,
     assignedTickets: tickets.filter(t => t.assignedToId !== null).length,
   };
 
@@ -246,7 +207,7 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
       <div className="flex items-center justify-center h-64">
         <div className="flex flex-col items-center gap-4">
           <RefreshCw className="w-12 h-12 text-[#911414] animate-spin" />
-          <p className="text-gray-600">Loading dashboard data...</p>
+          <p className="text-gray-600 font-medium">Loading executive dashboard analytics...</p>
         </div>
       </div>
     );
@@ -254,10 +215,10 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
 
   if (error) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-8">
+      <div className="bg-white rounded-xl shadow-lg p-8 border border-red-200">
         <div className="flex flex-col items-center gap-4 py-8">
           <AlertCircle className="w-16 h-16 text-red-500" />
-          <h3 className="text-xl font-semibold text-gray-900">Error Loading Dashboard</h3>
+          <h3 className="text-xl font-bold text-gray-900">Error Loading Dashboard</h3>
           <p className="text-gray-600">{error}</p>
         </div>
       </div>
@@ -265,10 +226,10 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <QuickStatsCards tickets={tickets} />
 
-      {/* Statistics Cards */}
+      {/* Clickable Statistics KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
         <StatCard
           icon={Mail}
@@ -276,15 +237,17 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
           value={stats.totalTickets || 0}
           color="text-[#911414]"
           bgColor="bg-white"
-          trend="+12% from last month"
+          subtitle="Click to view all"
+          onClick={() => onNavigateToTickets && onNavigateToTickets('all')}
         />
         <StatCard
           icon={AlertCircle}
           title="Open Tickets"
           value={stats.openTickets || 0}
-          color="text-orange-600"
+          color="text-amber-600"
           bgColor="bg-white"
-          subtitle={`${stats.criticalTickets || 0} critical`}
+          subtitle={`${stats.criticalTickets || 0} critical priority`}
+          onClick={() => onNavigateToTickets && onNavigateToTickets('Open')}
         />
         <StatCard
           icon={Clock}
@@ -292,30 +255,35 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
           value={stats.inProgressTickets || 0}
           color="text-purple-600"
           bgColor="bg-white"
+          subtitle="Actively assigned"
+          onClick={() => onNavigateToTickets && onNavigateToTickets('In Progress')}
         />
         <StatCard
           icon={AlertCircle}
-          title="Overdue"
+          title="Overdue Tickets"
           value={stats.overdueTickets || 0}
           color="text-red-600"
           bgColor="bg-white"
-          subtitle="Needs escalation"
+          subtitle="Service Charter risk"
+          onClick={() => onNavigateToTickets && onNavigateToTickets('Overdue')}
         />
         <StatCard
           icon={CheckCircle}
-          title="Resolved"
+          title="Resolved Tickets"
           value={stats.resolvedTickets || 0}
           color="text-emerald-600"
           bgColor="bg-white"
-          trend="+8% this week"
+          subtitle="Click to view fixes"
+          onClick={() => onNavigateToTickets && onNavigateToTickets('Resolved')}
         />
         <StatCard
           icon={Users}
-          title="Claimed"
+          title="Claimed Rate"
           value={`${assignmentRate}%`}
           color="text-blue-600"
           bgColor="bg-white"
-          subtitle={`${stats.assignedTickets} tickets`}
+          subtitle={`${stats.assignedTickets} claimed`}
+          onClick={() => onNavigateToTickets && onNavigateToTickets('Claimed')}
         />
       </div>
 
@@ -323,19 +291,20 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <StatCard
             icon={ShieldCheck}
-            title="SLA Compliance"
+            title="ICT Service Charter"
             value={`${operationsAnalytics.slaCompliance}%`}
             color="text-emerald-600"
             bgColor="bg-white"
-            subtitle={`${operationsAnalytics.slaBreached} breached tickets`}
+            subtitle={`${operationsAnalytics.slaBreached} timeframe breaches`}
+            onClick={() => onNavigateToTickets && onNavigateToTickets('Charter')}
           />
           <StatCard
             icon={Star}
-            title="CSAT Score"
-            value={operationsAnalytics.csatScore || 'N/A'}
+            title="CSAT Satisfaction"
+            value={operationsAnalytics.csatScore ? `${operationsAnalytics.csatScore} / 5` : 'N/A'}
             color="text-amber-600"
             bgColor="bg-white"
-            subtitle={`${operationsAnalytics.csatResponses} responses`}
+            subtitle={`${operationsAnalytics.csatResponses} customer ratings`}
           />
           <StatCard
             icon={CheckCircle}
@@ -343,53 +312,54 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
             value={operationsAnalytics.closed || 0}
             color="text-gray-700"
             bgColor="bg-white"
-            subtitle="Backend aggregated"
+            subtitle="Completed & archived"
+            onClick={() => onNavigateToTickets && onNavigateToTickets('Closed')}
           />
         </div>
       )}
 
-      {/* Main Trend Chart */}
+      {/* Main Volume & Trends */}
       <TicketTrendsChart data={analytics.trendData} />
 
-      {/* Category Issues */}
+      {/* Category Breakdown */}
       {analytics.categoryStats.length > 0 && (
         <TopCategoriesChart data={analytics.categoryStats} />
       )}
 
-      {/* Status Overview */}
+      {/* Status Overview Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <ActiveVsResolvedChart data={analytics.activeVsResolved} />
         <PriorityChart data={analytics.priorityStats} />
         <AssignmentChart data={analytics.assignmentData} />
       </div>
 
-      {/* Department Analytics */}
+      {/* Directorate Analytics */}
       {analytics.departmentTicketData.length > 0 && (
         <>
-          <div className="bg-gradient-to-r from-[#911414] to-[#d20001] text-white rounded-xl p-6">
+          <div className="bg-gradient-to-r from-[#911414] to-[#d20001] text-white rounded-xl p-6 shadow-md">
             <h2 className="text-2xl font-bold flex items-center gap-2">
               <TrendingUp className="w-6 h-6" />
-              Department Analytics
+              Directorate & Department Analytics
             </h2>
-            <p className="text-white/80 mt-1">Performance metrics across departments</p>
+            <p className="text-white/90 mt-1 text-sm font-medium">Service request volume and resolution performance by department</p>
           </div>
 
-          <div className="w-full">
+          <div className="w-full space-y-6">
             <DepartmentTicketChart data={analytics.departmentTicketData} />
             <DepartmentPerformanceChart data={analytics.departmentPerformance} />
           </div>
         </>
       )}
 
-      {/* Staff Performance */}
+      {/* ICT Staff Workload */}
       {analytics.userWorkloadData.length > 0 && (
         <>
-          <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl p-6">
+          <div className="bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-xl p-6 shadow-md">
             <h2 className="text-2xl font-bold flex items-center gap-2">
               <Users className="w-6 h-6" />
-              Staff Performance & Workload
+              ICT Staff Workload & Performance
             </h2>
-            <p className="text-white/80 mt-1">Individual staff metrics and productivity</p>
+            <p className="text-white/90 mt-1 text-sm font-medium">Distribution of claimed, active, and resolved support tickets per officer</p>
           </div>
 
           <div className="w-full">
@@ -403,13 +373,13 @@ export const DashboardView = ({ tickets = [], statistics = {}, isLoading = false
         <TopRequestersChart data={analytics.topRequesters} />
       )}
 
-      {/* Performance Metrics */}
-      <div className="w-full">
+      {/* Performance Trends */}
+      <div className="w-full space-y-6">
         <ResponseTimeChart data={analytics.responseTimeData} />
         <ResolutionRateChart data={analytics.resolutionRate} />
       </div>
 
-      {/* Volume by Hour */}
+      {/* Hourly Volume */}
       {analytics.volumeByHour.length > 0 && (
         <VolumeByHourChart data={analytics.volumeByHour} />
       )}

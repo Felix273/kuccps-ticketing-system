@@ -96,13 +96,16 @@ function App() {
       <Header currentUser={currentUser} onLogout={handleLogout} setActiveTab={setActiveTab} />
       <Navigation activeTab={activeTab} setActiveTab={setActiveTab} user={currentUser} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-10 py-8">
         {activeTab === 'dashboard' && (
           <DashboardView
             tickets={tickets}
             statistics={statistics}
             isLoading={statsLoading}
             error={ticketsError}
+            onNavigateToTickets={(filterType) => {
+              setActiveTab('tickets');
+            }}
           />
         )}
         {activeTab === 'tickets' && (
