@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
-const { authenticateToken, requireAdmin, requireStaffOrAdmin } = require('../middleware/auth');
+const { authenticateToken, requireAdmin, requireStaffOrAdmin, requirePermission } = require('../middleware/auth');
 
 // All routes require authentication
 router.use(authenticateToken);
@@ -11,7 +11,7 @@ router.use(requireStaffOrAdmin);
 router.get('/', userController.getAllUsers);
 
 // Sync users from Active Directory
-router.post('/sync/ad', requireAdmin, userController.syncUsersFromAd);
+router.post('/sync/ad', requirePermission('settings.ldap.update'), userController.syncUsersFromAd);
 
 // Create new user
 router.post('/', requireAdmin, userController.createUser);

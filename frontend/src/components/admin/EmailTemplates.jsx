@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { settingsService } from '../../services/settingsService';
 import { toast } from 'react-hot-toast';
 
-const EmailTemplates = () => {
+const EmailTemplates = ({ permissions = new Set() }) => {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingTemplate, setEditingTemplate] = useState(null);
@@ -105,23 +105,23 @@ const EmailTemplates = () => {
   if (loading) return <div className="text-center py-8">Loading...</div>;
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center mb-4">
+    <div className="settings-content-inner space-y-6">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h3 className="text-lg font-medium">Email Templates</h3>
         <div className="flex space-x-3">
-          <button
+          {permissions.has('settings.templates.reset') && <button
             onClick={handleResetToDefault}
-            className="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300"
+            className="px-4 py-2 bg-white text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
           >
             Reset to Default
-          </button>
-          {!editingTemplate && (
+          </button>}
+          {!editingTemplate && permissions.has('settings.templates.create') && (
             <button
               onClick={() => {
                 setEditingTemplate('new');
                 setTemplateForm({ type: 'ticketCreated', subject: '', html: '' });
               }}
-              className="px-4 py-2 bg-primary-600 text-white rounded hover:bg-primary-700"
+              className="px-4 py-2 bg-[#990024] text-white rounded-lg hover:bg-[#80001e] transition-colors"
             >
               New Template
             </button>
@@ -131,7 +131,7 @@ const EmailTemplates = () => {
 
       {/* Template Form */}
       {editingTemplate !== null && (
-        <div className="bg-white p-6 rounded-lg shadow-md">
+        <div className="bg-white p-4 sm:p-6 rounded-xl border border-slate-200 shadow-sm">
           <h3 className="text-xl font-medium mb-4">
             {editingTemplate === 'new' ? 'Create New Email Template' : 'Edit Email Template'}
           </h3>
@@ -141,7 +141,7 @@ const EmailTemplates = () => {
               <select
                 value={templateForm.type}
                 onChange={(e) => setTemplateForm(prev => ({...prev, type: e.target.value}))}
-                disabled={editingTemplate !== 'new'}
+                disabled={editingTemplate !== 'new' || !permissions.has('settings.templates.create')}
                 className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
               >
                 <option value="">Select Template Type</option>
@@ -157,6 +157,9 @@ const EmailTemplates = () => {
                 type="text"
                 value={templateForm.subject}
                 onChange={(e) => setTemplateForm(prev => ({...prev, subject: e.target.value}))}
+                disabled={editingTemplate === 'new'
+                  ? !permissions.has('settings.templates.create')
+                  : !permissions.has('settings.templates.update')}
                 placeholder="[Ticket #{{ticketNumber}}] Your support request has been received"
                 className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
               />
@@ -170,6 +173,9 @@ const EmailTemplates = () => {
               <textarea
                 value={templateForm.html}
                 onChange={(e) => setTemplateForm(prev => ({...prev, html: e.target.value}))}
+                disabled={editingTemplate === 'new'
+                  ? !permissions.has('settings.templates.create')
+                  : !permissions.has('settings.templates.update')}
                 rows="15"
                 className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
                 placeholder="Enter HTML email template here..."
@@ -180,16 +186,18 @@ const EmailTemplates = () => {
               <button
                 type="button"
                 onClick={handleCancelEdit}
-                className="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300"
+                className="px-4 py-2 bg-white text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
               >
                 Cancel
               </button>
-              <button
+              {(editingTemplate === 'new'
+                ? permissions.has('settings.templates.create')
+                : permissions.has('settings.templates.update')) && <button
                 type="submit"
-                className="px-6 py-3 bg-primary-600 text-white rounded-md hover:bg-primary-700"
+                className="px-5 py-2.5 bg-[#990024] text-white rounded-lg hover:bg-[#80001e] transition-colors"
               >
                 {editingTemplate === 'new' ? 'Create Template' : 'Update Template'}
-              </button>
+              </button>}
             </div>
           </form>
         </div>
@@ -200,25 +208,25 @@ const EmailTemplates = () => {
         <div className="space-y-4">
           {templates.length > 0 ? (
             templates.map(template => (
-              <div key={template.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
+              <div key={template.id} className="border border-slate-200 rounded-xl p-4 sm:p-5 hover:border-slate-300 hover:shadow-sm transition-all">
                 <div className="flex justify-between items-start mb-3">
                   <div>
                     <h4 className="font-medium">{template.type}</h4>
                     <p className="text-sm text-gray-500">ID: {template.id}</p>
                   </div>
                   <div className="flex space-x-2">
-                    <button
+                    {permissions.has('settings.templates.update') && <button
                       onClick={() => handleEditTemplate(template)}
-                      className="px-3 py-1 bg-blue-500 text-white text-sm rounded hover:bg-blue-600"
+                      className="px-3 py-1.5 bg-slate-100 text-slate-700 text-sm rounded-lg hover:bg-slate-200 transition-colors"
                     >
                       Edit
-                    </button>
-                    <button
+                    </button>}
+                    {permissions.has('settings.templates.delete') && <button
                       onClick={() => handleDeleteTemplate(template.type)}
-                      className="px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600"
+                      className="px-3 py-1.5 bg-rose-50 text-rose-700 text-sm rounded-lg hover:bg-rose-100 transition-colors"
                     >
                       Delete
-                    </button>
+                    </button>}
                   </div>
                 </div>
 

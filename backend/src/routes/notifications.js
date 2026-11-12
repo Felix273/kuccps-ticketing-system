@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requirePermission } = require('../middleware/auth');
 const { PrismaClient } = require('@prisma/client');
 const { createEmailTransporter, getSystemSettings } = require('../services/emailService');
 
@@ -116,7 +116,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   });
 });
 
-router.get('/preferences', authenticateToken, async (req, res) => {
+router.get('/preferences', authenticateToken, requirePermission('settings.notifications.view'), async (req, res) => {
   try {
     const preferences = await getOrCreatePreferences(req.user.id);
     res.json({
@@ -133,7 +133,7 @@ router.get('/preferences', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/preferences', authenticateToken, async (req, res) => {
+router.put('/preferences', authenticateToken, requirePermission('settings.notifications.update'), async (req, res) => {
   try {
     const data = {};
     Object.keys(DEFAULT_PREFERENCES).forEach(key => {
@@ -165,7 +165,7 @@ router.put('/preferences', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/test', authenticateToken, async (req, res) => {
+router.post('/test', authenticateToken, requirePermission('settings.notifications.test'), async (req, res) => {
   try {
     const settings = await getSystemSettings();
     const transporter = await createEmailTransporter();

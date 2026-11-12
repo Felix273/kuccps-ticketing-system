@@ -273,7 +273,8 @@ async function ensureDepartment(name) {
 
 async function upsertAdUser(adUser, settings, forceRole) {
   const department = await ensureDepartment(adUser.department);
-  let role = forceRole || (isIctUser(adUser, settings) ? 'staff' : settings.ldapDefaultRole || 'user');
+  const defaultRole = ['user', 'staff'].includes(settings.ldapDefaultRole) ? settings.ldapDefaultRole : 'user';
+  let role = forceRole || (isIctUser(adUser, settings) ? 'staff' : defaultRole);
   const password = await bcrypt.hash(`AD_SYNC_${adUser.username}_${Date.now()}`, 10);
 
   const existing = await prisma.user.findFirst({
@@ -299,19 +300,33 @@ async function upsertAdUser(adUser, settings, forceRole) {
 
   if (existing) {
     role = existing.role === 'admin' ? 'admin' : role;
-    return prisma.user.update({
+    const user = await prisma.user.update({
       where: { id: existing.id },
       data: { ...data, role },
       include: { department: true }
     });
+    await ensureBaseRoleAssignment(user.id, role);
+    return user;
   }
 
-  return prisma.user.create({
+  const user = await prisma.user.create({
     data: {
       ...data,
       password
     },
     include: { department: true }
+  });
+  await ensureBaseRoleAssignment(user.id, role);
+  return user;
+}
+
+async function ensureBaseRoleAssignment(userId, roleName) {
+  const role = await prisma.accessRole.findUnique({ where: { name: roleName } });
+  if (!role) return;
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId, roleId: role.id } },
+    update: {},
+    create: { userId, roleId: role.id }
   });
 }
 

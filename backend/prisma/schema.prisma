@@ -29,6 +29,7 @@ model User {
   savedViews      SavedView[]
   csatResponses   CsatResponse[]
   notificationPreference NotificationPreference?
+  roleAssignments UserRole[]
 
   @@index([email])
   @@index([username])
@@ -381,4 +382,64 @@ model NotificationPreference {
   updatedAt           DateTime @updatedAt
 
   @@index([userId])
+}
+
+model AccessRole {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  description String?
+  isSystem    Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  users       UserRole[]
+  permissions RolePermission[]
+}
+
+model AccessPermission {
+  id          String           @id @default(uuid())
+  key         String           @unique
+  description String
+  createdAt   DateTime         @default(now())
+  roles       RolePermission[]
+}
+
+model UserRole {
+  id           String     @id @default(uuid())
+  userId       String
+  roleId       String
+  assignedById String?
+  createdAt    DateTime   @default(now())
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role         AccessRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  id           String           @id @default(uuid())
+  roleId       String
+  permissionId String
+  role         AccessRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   AccessPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model AccessControlAuditLog {
+  id              String   @id @default(uuid())
+  actorId         String
+  actorEmail      String
+  targetUserId    String?
+  targetUserEmail String?
+  roleId          String?
+  roleName        String?
+  action          String
+  details         Json?
+  createdAt       DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([targetUserId, createdAt])
+  @@index([roleId, createdAt])
 }
