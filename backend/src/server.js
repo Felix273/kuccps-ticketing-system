@@ -46,6 +46,7 @@ app.use('/api/departments', departmentRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/settings', require('./routes/settings'));
+app.use('/api/access-control', require('./routes/accessControl'));
 app.use('/api/views', require('./routes/views'));
 app.use('/api/knowledge-base', require('./routes/knowledgeBase'));
 app.use('/api/status-issues', require('./routes/statusIssues'));

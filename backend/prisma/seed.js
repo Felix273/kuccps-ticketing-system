@@ -1,5 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+const { ensureDefaultRoles } = require('../src/services/accessControlService');
 
 const prisma = new PrismaClient();
 
@@ -10,33 +11,40 @@ async function main() {
     create: { name: 'ICT', code: 'ICT' }
   });
 
-  const adminPassword = await bcrypt.hash('admin123', 10);
-  await prisma.user.upsert({
-    where: { username: 'admin' },
-    update: {},
-    create: {
-      username: 'admin',
-      email: 'admin@kuccps.ac.ke',
-      name: 'System Administrator',
-      password: adminPassword,
-      role: 'admin',
-      departmentId: ictDept.id
+  const adminCount = await prisma.user.count({ where: { role: 'admin' } });
+  if (adminCount === 0) {
+    const username = process.env.BOOTSTRAP_ADMIN_USERNAME?.trim();
+    const email = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
+    const name = process.env.BOOTSTRAP_ADMIN_NAME?.trim();
+    const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+    if (!username || !email || !name || !password) {
+      throw new Error('No administrator exists. Configure BOOTSTRAP_ADMIN_USERNAME, BOOTSTRAP_ADMIN_EMAIL, BOOTSTRAP_ADMIN_NAME, and BOOTSTRAP_ADMIN_PASSWORD before seeding.');
     }
-  });
+    if (password.length < 16 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
+      throw new Error('BOOTSTRAP_ADMIN_PASSWORD must be at least 16 characters and include uppercase, lowercase, and numeric characters.');
+    }
+    const existingAccount = await prisma.user.findFirst({
+      where: { OR: [{ username }, { email }] },
+      select: { id: true, role: true }
+    });
+    if (existingAccount && existingAccount.role !== 'admin') {
+      throw new Error('Bootstrap admin username or email already belongs to a non-admin account.');
+    }
+    if (!existingAccount) {
+      await prisma.user.create({
+        data: {
+          username,
+          email,
+          name,
+          password: await bcrypt.hash(password, 12),
+          role: 'admin',
+          departmentId: ictDept.id
+        }
+      });
+    }
+  }
 
-  const staffPassword = await bcrypt.hash('staff123', 10);
-  await prisma.user.upsert({
-    where: { username: 'itstaff' },
-    update: {},
-    create: {
-      username: 'itstaff',
-      email: 'itstaff@kuccps.ac.ke',
-      name: 'IT Support Staff',
-      password: staffPassword,
-      role: 'staff',
-      departmentId: ictDept.id
-    }
-  });
+  await ensureDefaultRoles(prisma);
 
   const settingsCount = await prisma.systemSettings.count();
   if (settingsCount === 0) {
@@ -205,8 +213,7 @@ async function main() {
   }
 
   console.log('Seed complete!');
-  console.log('admin / admin123');
-  console.log('itstaff / staff123');
+  console.log('Default access-control roles and permissions are ready.');
 }
 
 main()

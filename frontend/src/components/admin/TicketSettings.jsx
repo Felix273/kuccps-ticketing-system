@@ -14,7 +14,7 @@ const TicketSettings = () => {
   const loadSettings = async () => {
     try {
       setLoading(true);
-      const response = await settingsService.getSystemSettings();
+      const response = await settingsService.getSystemSettings('tickets');
       if (response.success) {
         setSettings(response.settings || {});
       }
@@ -45,7 +45,7 @@ const TicketSettings = () => {
   if (loading) return <div className="text-center py-8">Loading...</div>;
 
   return (
-    <form onSubmit={handleSave} className="space-y-6">
+    <form onSubmit={handleSave} className="settings-form settings-sections">
       <div>
         <h3 className="text-lg font-medium mb-4">Ticket Numbering</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

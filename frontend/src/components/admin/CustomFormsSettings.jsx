@@ -5,7 +5,7 @@ import { ISSUE_CATEGORIES } from '../../utils/constants';
 
 const emptyField = { label: '', key: '', type: 'text', required: false };
 
-const CustomFormsSettings = () => {
+const CustomFormsSettings = ({ permissions = new Set() }) => {
   const [forms, setForms] = useState([]);
   const [draft, setDraft] = useState({
     name: '',
@@ -54,21 +54,21 @@ const CustomFormsSettings = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <form onSubmit={saveForm} className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
-        <h3 className="text-lg font-semibold">Category Form Builder</h3>
+    <div className="settings-content-inner space-y-6">
+      {permissions.has('settings.forms.create') && <form onSubmit={saveForm} className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 space-y-4">
+        <h3 className="text-lg font-semibold text-slate-900">Category Form Builder</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <input
             required
             value={draft.name}
             onChange={(e) => setDraft(prev => ({ ...prev, name: e.target.value }))}
             placeholder="Form name"
-            className="px-4 py-2 border border-gray-300 rounded-md"
+            className="settings-field"
           />
           <select
             value={draft.category}
             onChange={(e) => setDraft(prev => ({ ...prev, category: e.target.value }))}
-            className="px-4 py-2 border border-gray-300 rounded-md"
+            className="settings-field"
           >
             {ISSUE_CATEGORIES.map(category => <option key={category}>{category}</option>)}
           </select>
@@ -78,28 +78,28 @@ const CustomFormsSettings = () => {
           onChange={(e) => setDraft(prev => ({ ...prev, description: e.target.value }))}
           placeholder="What this form collects"
           rows={2}
-          className="w-full px-4 py-2 border border-gray-300 rounded-md"
+          className="settings-field"
         />
 
         <div className="space-y-3">
           {draft.fields.map((field, index) => (
-            <div key={index} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-center bg-gray-50 p-3 rounded-lg">
+            <div key={index} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
               <input
                 value={field.label}
                 onChange={(e) => updateField(index, { label: e.target.value, key: field.key || e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '_') })}
                 placeholder="Field label"
-                className="px-3 py-2 border border-gray-300 rounded-md md:col-span-2"
+                className="settings-field md:col-span-2"
               />
               <input
                 value={field.key}
                 onChange={(e) => updateField(index, { key: e.target.value })}
                 placeholder="field_key"
-                className="px-3 py-2 border border-gray-300 rounded-md"
+                className="settings-field"
               />
               <select
                 value={field.type}
                 onChange={(e) => updateField(index, { type: e.target.value })}
-                className="px-3 py-2 border border-gray-300 rounded-md"
+                className="settings-field"
               >
                 <option value="text">Text</option>
                 <option value="textarea">Long Text</option>
@@ -113,7 +113,7 @@ const CustomFormsSettings = () => {
                   <input type="checkbox" checked={field.required} onChange={(e) => updateField(index, { required: e.target.checked })} />
                   Required
                 </label>
-                <button type="button" onClick={() => removeField(index)} className="p-2 text-red-600 hover:bg-red-50 rounded">
+                <button type="button" onClick={() => removeField(index)} className="p-2 text-rose-700 hover:bg-rose-50 rounded-lg">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
@@ -122,20 +122,20 @@ const CustomFormsSettings = () => {
         </div>
 
         <div className="flex justify-between">
-          <button type="button" onClick={addField} className="px-4 py-2 border border-gray-300 rounded-md flex items-center gap-2">
+          <button type="button" onClick={addField} className="px-4 py-2 border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 flex items-center gap-2 transition-colors">
             <Plus className="w-4 h-4" />
             Field
           </button>
-          <button type="submit" className="px-5 py-2 bg-primary-600 text-white rounded-md">Save Form</button>
+          <button type="submit" className="px-5 py-2 bg-[#990024] text-white rounded-lg hover:bg-[#80001e] transition-colors">Save Form</button>
         </div>
-      </form>
+      </form>}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {forms.map(form => (
-          <div key={form.id} className="bg-white border border-gray-200 rounded-lg p-4">
-            <h4 className="font-semibold text-gray-900">{form.name}</h4>
-            <p className="text-sm text-gray-600">{form.category || 'All categories'}</p>
-            <p className="text-xs text-gray-500 mt-2">{form.fields?.length || 0} fields</p>
+          <div key={form.id} className="bg-white border border-slate-200 rounded-xl p-4 hover:border-slate-300 transition-colors">
+            <h4 className="font-semibold text-slate-900">{form.name}</h4>
+            <p className="text-sm text-slate-600">{form.category || 'All categories'}</p>
+            <p className="text-xs text-slate-500 mt-2">{form.fields?.length || 0} fields</p>
           </div>
         ))}
       </div>

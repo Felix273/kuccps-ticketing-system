@@ -39,7 +39,7 @@ class ApiService {
       const response = await fetch(`${this.baseURL}${endpoint}`, config);
       
       // Handle authentication errors
-      if (response.status === 401 || response.status === 403) {
+      if (response.status === 401) {
         // Clear invalid token
         localStorage.removeItem('token');
         localStorage.removeItem('user');

@@ -2,8 +2,9 @@ import { api } from './api';
 
 export const settingsService = {
   // System Settings
-  getSystemSettings: async () => {
-    return await api.get('/settings/');
+  getSystemSettings: async (section) => {
+    const query = new URLSearchParams({ section }).toString();
+    return await api.get(`/settings/?${query}`);
   },
 
   updateSystemSettings: async (settingsData) => {

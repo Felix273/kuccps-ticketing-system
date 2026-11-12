@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Bell, Mail, Calendar, AlertTriangle, MessageSquare, Save, Send, CheckCircle } from 'lucide-react';
 import { notificationService } from '../../services/notificationService';
+import { accessControlService } from '../../services/accessControlService';
 
 export const NotificationPreferences = () => {
+  const [permissions, setPermissions] = useState(null);
   const [preferences, setPreferences] = useState({
     emailOnAssignment: true,
     emailOnStatusChange: true,
     emailOnNewComment: true,
-    dailyDigest: true,
+    dailyDigest: false,
     escalationAlerts: true
   });
   const [isLoading, setIsLoading] = useState(true);
@@ -16,8 +18,28 @@ export const NotificationPreferences = () => {
   const [message, setMessage] = useState(null);
 
   useEffect(() => {
-    fetchPreferences();
+    let active = true;
+    accessControlService.getMyAccess()
+      .then(access => {
+        if (active) setPermissions(access.permissions || []);
+      })
+      .catch(error => {
+        console.error('Unable to load notification preference permissions:', error);
+        if (active) setPermissions([]);
+      });
+    return () => { active = false; };
   }, []);
+
+  const canView = permissions?.includes('settings.notifications.view') || false;
+  const canEdit = permissions?.includes('settings.notifications.update') || false;
+  const canTest = permissions?.includes('settings.notifications.test') || false;
+
+  useEffect(() => {
+    if (canView) fetchPreferences();
+    else if (permissions) setIsLoading(false);
+  }, [canView, permissions]);
+
+  if (permissions && !canView) return null;
 
   const fetchPreferences = async () => {
     try {
@@ -83,8 +105,8 @@ export const NotificationPreferences = () => {
     {
       key: 'emailOnAssignment',
       icon: <Mail className="w-5 h-5" />,
-      title: 'Ticket Claims',
-      description: 'Get notified when a ticket is claimed by you',
+      title: 'Ticket Assignments',
+      description: 'Get an email when a ticket is assigned to you',
       color: 'text-blue-600'
     },
     {
@@ -105,14 +127,14 @@ export const NotificationPreferences = () => {
       key: 'dailyDigest',
       icon: <Calendar className="w-5 h-5" />,
       title: 'Daily Digest',
-      description: 'Receive a daily summary of your active tickets',
+      description: 'Receive a daily summary of your active tickets at 8:00 AM',
       color: 'text-orange-600'
     },
     {
       key: 'escalationAlerts',
       icon: <AlertTriangle className="w-5 h-5" />,
       title: 'Escalation Alerts',
-      description: 'Get urgent alerts for overdue high-priority tickets',
+      description: 'Get alerts every two hours for high-priority tickets over two days past SLA',
       color: 'text-red-600'
     }
   ];
@@ -138,19 +160,20 @@ export const NotificationPreferences = () => {
             Manage your email notification preferences
           </p>
         </div>
-        <button
+        {canTest && <button
           onClick={handleTestNotification}
-          disabled={isTesting}
+          type="button"
+          disabled={isTesting || isLoading}
           className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
         >
           <Send className="w-4 h-4" />
           {isTesting ? 'Sending...' : 'Send Test Email'}
-        </button>
+        </button>}
       </div>
 
       {/* Message */}
       {message && (
-        <div className={`p-4 rounded-lg border-2 flex items-center gap-3 ${
+        <div role="status" className={`p-4 rounded-lg border flex items-center gap-3 ${
           message.type === 'success'
             ? 'bg-green-50 border-green-200 text-green-800'
             : 'bg-red-50 border-red-200 text-red-800'
@@ -184,12 +207,16 @@ export const NotificationPreferences = () => {
               
               {/* Toggle Switch */}
               <button
+                type="button"
                 onClick={() => handleToggle(option.key)}
+                aria-label={`${option.title}: ${preferences[option.key] ? 'enabled' : 'disabled'}`}
+                aria-pressed={Boolean(preferences[option.key])}
+                disabled={isSaving || !canEdit}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[#911414] focus:ring-offset-2 ${
                   preferences[option.key]
                     ? 'bg-[#911414]'
                     : 'bg-gray-300'
-                }`}
+                } disabled:cursor-not-allowed disabled:opacity-60`}
               >
                 <span
                   className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -207,8 +234,9 @@ export const NotificationPreferences = () => {
       {/* Save Button */}
       <div className="pt-4 border-t border-gray-200 flex justify-end">
         <button
+          type="button"
           onClick={handleSave}
-          disabled={isSaving}
+          disabled={isSaving || isLoading || !canEdit}
           className="px-6 py-2 bg-gradient-to-r from-[#911414] to-[#d20001] text-white rounded-lg hover:from-[#ac0807] hover:to-[#911414] font-medium transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
         >
           <Save className="w-4 h-4" />
@@ -224,13 +252,13 @@ export const NotificationPreferences = () => {
         </h4>
         <div className="space-y-1 text-xs text-blue-800">
           <p>
-            <strong>Daily Digest:</strong> Sent every morning at 8:00 AM with a summary of your active tickets.
+            <strong>Daily Digest:</strong> Sent every morning at 8:00 AM Nairobi time with a summary of up to 50 active tickets assigned to you or created by you.
           </p>
           <p>
-            <strong>Escalation Alerts:</strong> Sent every 2 hours for high/critical priority tickets that are more than 2 days old.
+            <strong>Escalation Alerts:</strong> Sent every 2 hours for high/critical priority tickets more than 2 days past their SLA due time.
           </p>
           <p>
-            <strong>Instant Notifications:</strong> Sent immediately when tickets are claimed or status changes occur.
+            <strong>Instant Notifications:</strong> Delivered when a ticket is assigned to you, its status changes, a new comment is added, or it is escalated to you.
           </p>
         </div>
       </div>

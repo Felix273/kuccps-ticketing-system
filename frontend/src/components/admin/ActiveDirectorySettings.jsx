@@ -14,7 +14,7 @@ const ActiveDirectorySettings = () => {
   const loadSettings = async () => {
     try {
       setLoading(true);
-      const response = await settingsService.getSystemSettings();
+      const response = await settingsService.getSystemSettings('ldap');
       if (response.success) setSettings(response.settings || {});
     } catch {
       toast.error('Failed to load Active Directory settings');
@@ -53,7 +53,7 @@ const ActiveDirectorySettings = () => {
   if (loading) return <div className="text-center py-8">Loading...</div>;
 
   return (
-    <form onSubmit={handleSave} className="space-y-6">
+    <form onSubmit={handleSave} className="settings-form settings-sections">
       <div>
         <h3 className="text-lg font-medium mb-4">Active Directory Connection</h3>
         <label className="flex items-center gap-2 mb-4">
