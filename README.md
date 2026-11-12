@@ -337,6 +337,35 @@ Defined in `backend/src/routes/notifications.js`.
 | PUT | `/preferences` | JWT | Save notification preferences |
 | POST | `/test` | JWT | Send a test notification email |
 
+### Access control: `/api/access-control`
+
+Settings permissions are resolved from database role assignments on every request. The signed JWT is used to identify the user only; role and permission changes take effect without waiting for token expiry.
+
+| Method | Route | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/me` | JWT | Get the current user's effective permissions |
+| GET | `/roles` | Admin | List roles and permission definitions |
+| POST | `/roles` | Admin | Create a role with explicitly selected permissions |
+| PUT | `/roles/:id` | Admin | Replace permissions on a non-admin role |
+| DELETE | `/roles/:id` | Admin | Delete an unused custom role |
+| GET | `/users` | Admin | List users and their role assignments |
+| PUT | `/users/:userId/roles` | Admin | Replace another user's role assignments |
+| GET | `/audit` | Admin | List the latest access-control audit events |
+
+Built-in permissions cover organization, email/IMAP, ticket/SLA, LDAP, email-template, custom-form, and self-service notification preference actions. Mutation permissions imply the matching view permission. The protected `admin` role has all permissions and cannot be edited or deleted. The `access-control.manage` permission cannot be granted to custom roles. Administrators cannot change their own assignments or permissions through a role they hold, and concurrent changes cannot remove the final administrator. Notification preference APIs are restricted to the authenticated user's own preferences.
+
+The public read-only `/api/settings/public` and `/api/forms/public` endpoints remain public for branding and ticket form workflows. Custom-form management, SLA policies, Active Directory sync, and all other Settings APIs require the corresponding permission.
+
+After deploying the backend code, apply the database migration and regenerate Prisma Client from `backend/`:
+
+```bash
+npx prisma migrate deploy
+npx prisma generate
+npx prisma db seed
+```
+
+The seed preserves existing administrator accounts and maps existing `admin`, `staff`, and other user roles to their matching RBAC roles (unknown values map to `user`). For a fresh database with no administrator, configure the `BOOTSTRAP_ADMIN_*` environment variables described in the seed section before running it. Do not apply migrations to production until the migration has been reviewed and the database backed up.
+
 ### Custom forms: `/api/forms`
 
 Defined in `backend/src/routes/forms.js`.
@@ -552,11 +581,12 @@ npm run preflight
 npx prisma db seed
 ```
 
-The seed script creates:
+The seed script creates or preserves:
 
 - ICT department
-- Admin user: `admin / admin123`
-- Staff user: `itstaff / staff123`
+- Default admin, staff, and user RBAC roles with granular permissions
+- An initial administrator only when one does not already exist. Set `BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_NAME`, and a strong `BOOTSTRAP_ADMIN_PASSWORD` in the backend environment before seeding a fresh database. The password must be at least 16 characters with uppercase, lowercase, and numeric characters; it is never printed.
+- Existing users mapped from their current `role` value to a safe default RBAC role; existing admins remain admins.
 - Default system settings
 - Default email templates
 

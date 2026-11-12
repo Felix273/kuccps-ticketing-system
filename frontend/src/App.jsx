@@ -11,6 +11,7 @@ import { KnowledgeBaseView } from './components/knowledgebase/KnowledgeBaseView'
 import AdminPanel from './components/admin/AdminPanel';
 import { authService } from './services/authService';
 import { settingsService } from './services/settingsService';
+import { accessControlService } from './services/accessControlService';
 import { useTickets } from './hooks/useTickets';
 import { useStatistics } from './hooks/useStatistics';
 
@@ -24,6 +25,28 @@ function App() {
 
   const { tickets, isLoading: ticketsLoading, error: ticketsError, fetchTickets } = useTickets(isAuthenticated);
   const { statistics, isLoading: statsLoading } = useStatistics(isAuthenticated);
+  useEffect(() => {
+    let active = true;
+    if (!isAuthenticated) return () => { active = false; };
+    accessControlService.getMyAccess()
+      .then(access => {
+        if (active) {
+          setCurrentUser(user => user ? {
+            ...user,
+            permissions: access.permissions || [],
+            isAdmin: Boolean(access.isAdmin)
+          } : user);
+        }
+      })
+      .catch(error => {
+        console.error('Unable to load current access permissions:', error);
+        if (active) {
+          setCurrentUser(user => user ? { ...user, permissions: [], isAdmin: false } : user);
+        }
+      });
+    return () => { active = false; };
+  }, [isAuthenticated, currentUser?.id]);
+
 
   useEffect(() => {
     const applyBranding = async () => {
@@ -123,7 +146,7 @@ function App() {
           <KnowledgeBaseView />
         )}
         {activeTab === 'admin' && (
-          <AdminPanel />
+          <AdminPanel currentUser={currentUser} />
         )}
       </main>
     </div>

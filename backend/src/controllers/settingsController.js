@@ -1,7 +1,20 @@
 const { PrismaClient } = require('@prisma/client');
 const { clearSettingsCache } = require('../services/emailService');
+const { SETTINGS_FIELD_SECTIONS } = require('../services/accessControlService');
 
 const prisma = new PrismaClient();
+
+function getSafeSettings(settings, sections) {
+  const safeSettings = Object.fromEntries(
+    Object.entries(settings).filter(([key]) => sections.has(SETTINGS_FIELD_SECTIONS[key]))
+  );
+  for (const key of ['smtpPassword', 'imapPassword', 'ldapBindPassword']) {
+    if (sections.has(SETTINGS_FIELD_SECTIONS[key])) {
+      safeSettings[key] = settings[key] ? '********' : null;
+    }
+  }
+  return safeSettings;
+}
 
 function getInitialEmailSettings() {
   return {
@@ -40,6 +53,7 @@ function getInitialEmailSettings() {
 
 exports.getSettings = async (req, res) => {
   try {
+    const section = req.query.section;
     let settings = await prisma.systemSettings.findFirst();
 
     if (!settings) {
@@ -48,12 +62,7 @@ exports.getSettings = async (req, res) => {
       });
     }
 
-    const safeSettings = {
-      ...settings,
-      smtpPassword: settings.smtpPassword ? '********' : null,
-      imapPassword: settings.imapPassword ? '********' : null,
-      ldapBindPassword: settings.ldapBindPassword ? '********' : null
-    };
+    const safeSettings = getSafeSettings(settings, new Set([section]));
 
     res.json({ success: true, settings: safeSettings });
   } catch (error) {
@@ -198,12 +207,8 @@ exports.updateSettings = async (req, res) => {
       data: updateData
     });
 
-    const safeSettings = {
-      ...updated,
-      smtpPassword: updated.smtpPassword ? '********' : null,
-      imapPassword: updated.imapPassword ? '********' : null,
-      ldapBindPassword: updated.ldapBindPassword ? '********' : null
-    };
+    const sections = new Set(Object.keys(req.body).map(key => SETTINGS_FIELD_SECTIONS[key]));
+    const safeSettings = getSafeSettings(updated, sections);
 
     clearSettingsCache();
 
