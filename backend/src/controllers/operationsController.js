@@ -43,6 +43,15 @@ function getNextSlaDeadline(ticket) {
   return deadlines.sort((left, right) => left - right)[0] || null;
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function buildAiInsights(tickets, users) {
   const now = new Date();
   const activeTickets = tickets.filter(ticket => OPEN_STATUSES.has(ticket.status));
@@ -488,6 +497,54 @@ exports.createPublicCsatResponse = async (req, res) => {
   } catch (error) {
     console.error('Create public CSAT response error:', error);
     res.status(500).json({ success: false, message: 'Failed to save your feedback' });
+  }
+};
+
+exports.handleEmailCsatRate = async (req, res) => {
+  try {
+    const { ticketId, rating } = req.query;
+    const numericRating = Number(rating);
+    if (!ticketId || !Number.isInteger(numericRating) || numericRating < 1 || numericRating > 5) {
+      return res.status(400).send('<h2>Invalid rating request</h2>');
+    }
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, ticketNumber: true, subject: true, status: true }
+    });
+    if (!ticket) return res.status(404).send('<h2>Ticket not found</h2>');
+    if (!RESOLVED_STATUSES.has(ticket.status)) {
+      return res.status(409).send('<h2>Feedback is available after a ticket is resolved</h2>');
+    }
+
+    const existing = await prisma.csatResponse.findFirst({ where: { ticketId } });
+    if (existing) {
+      await prisma.csatResponse.update({
+        where: { id: existing.id },
+        data: { rating: numericRating }
+      });
+    } else {
+      await prisma.csatResponse.create({
+        data: { ticketId, rating: numericRating }
+      });
+    }
+
+    res.type('html').send(`
+      <!DOCTYPE html>
+      <html lang="en">
+        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Feedback received</title></head>
+        <body style="font-family:Arial,sans-serif;background:#f3f4f6;margin:0;padding:40px 20px;text-align:center">
+          <main style="max-width:520px;margin:0 auto;background:white;border-radius:12px;padding:32px">
+            <h1>KUCCPS IT Support</h1>
+            <p>Your ${numericRating}-star rating for ticket <strong>${escapeHtml(ticket.ticketNumber)}</strong> has been recorded.</p>
+            <p>${escapeHtml(ticket.subject)}</p>
+          </main>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('Handle email CSAT rate error:', error);
+    res.status(500).send('<h2>Failed to record rating</h2>');
   }
 };
 
