@@ -4,7 +4,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 export const ResponseTimeChart = ({ data }) => (
   <div className="bg-white rounded-xl shadow-lg p-6">
     <h3 className="text-lg font-semibold text-gray-900 mb-6">Average Response Time</h3>
-    <ResponsiveContainer width="100%" height={280}>
+    <ResponsiveContainer width="100%" height={280} initialDimension={{ width: 400, height: 280 }}>
       <LineChart data={data}>
         <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
         <XAxis dataKey="date" stroke="#6b7280" style={{ fontSize: '12px' }} />

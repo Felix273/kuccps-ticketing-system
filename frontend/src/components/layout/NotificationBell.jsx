@@ -7,6 +7,7 @@ export const NotificationBell = ({ onOpenSettings }) => {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const dropdownRef = useRef(null);
 
   // Fetch notifications when opening dropdown
@@ -37,14 +38,18 @@ export const NotificationBell = ({ onOpenSettings }) => {
 
   const fetchNotifications = async () => {
     setIsLoading(true);
+    setLoadError('');
     try {
       const result = await notificationService.getNotifications(false);
       if (result.success) {
         setNotifications(result.notifications || []);
         setUnreadCount(result.unreadCount || 0);
+      } else {
+        setLoadError(result.message || 'Unable to load notifications');
       }
     } catch (error) {
       console.error('Error fetching notifications:', error);
+      setLoadError('Unable to load notifications. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -63,12 +68,6 @@ export const NotificationBell = ({ onOpenSettings }) => {
 
   const handleMarkAsRead = async (notificationId, event) => {
     event.stopPropagation();
-    if (String(notificationId).startsWith('overdue-')) {
-      setNotifications(prev => prev.map(item => item.id === notificationId ? { ...item, isRead: true } : item));
-      setUnreadCount(prev => Math.max(0, prev - 1));
-      return;
-    }
-
     try {
       const result = await notificationService.markAsRead(notificationId);
       if (result.success) {
@@ -92,12 +91,6 @@ export const NotificationBell = ({ onOpenSettings }) => {
 
   const handleDelete = async (notificationId, event) => {
     event.stopPropagation();
-    if (String(notificationId).startsWith('overdue-')) {
-      setNotifications(prev => prev.filter(item => item.id !== notificationId));
-      setUnreadCount(prev => Math.max(0, prev - 1));
-      return;
-    }
-
     try {
       const result = await notificationService.deleteNotification(notificationId);
       if (result.success) {
@@ -110,7 +103,7 @@ export const NotificationBell = ({ onOpenSettings }) => {
 
   const handleSettingsClick = () => {
     setIsOpen(false);
-    onOpenSettings();
+    onOpenSettings?.();
   };
 
   const getNotificationIcon = (type) => {
@@ -121,13 +114,17 @@ export const NotificationBell = ({ onOpenSettings }) => {
         return '🔄';
       case 'comment':
         return '💬';
+      case 'escalation':
+        return '⚠️';
       default:
         return '🔔';
     }
   };
 
   const formatTimeAgo = (date) => {
-    const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+    const timestamp = new Date(date).getTime();
+    if (!Number.isFinite(timestamp)) return '';
+    const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
     
     if (seconds < 60) return 'Just now';
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
@@ -140,7 +137,10 @@ export const NotificationBell = ({ onOpenSettings }) => {
     <div className="relative" ref={dropdownRef}>
       {/* Bell Button */}
       <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
+        aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ''}`}
+        aria-expanded={isOpen}
         className="relative p-2 text-gray-600 hover:text-[#911414] hover:bg-gray-100 rounded-lg transition-colors"
       >
         <Bell className="w-6 h-6" />
@@ -153,7 +153,7 @@ export const NotificationBell = ({ onOpenSettings }) => {
 
       {/* Dropdown Menu */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-96 bg-white rounded-xl shadow-2xl border-2 border-gray-200 z-50 overflow-hidden">
+        <div className="absolute right-0 mt-2 w-[min(24rem,calc(100vw-2rem))] bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden">
           {/* Header */}
           <div className="bg-gradient-to-r from-[#911414] to-[#d20001] text-white p-4">
             <div className="flex justify-between items-center">
@@ -182,6 +182,17 @@ export const NotificationBell = ({ onOpenSettings }) => {
               <div className="p-8 text-center">
                 <div className="animate-spin w-8 h-8 border-4 border-[#911414] border-t-transparent rounded-full mx-auto"></div>
                 <p className="text-sm text-gray-500 mt-2">Loading...</p>
+              </div>
+            ) : loadError ? (
+              <div className="p-6 text-center">
+                <p className="text-sm text-rose-700">{loadError}</p>
+                <button
+                  type="button"
+                  onClick={fetchNotifications}
+                  className="mt-2 text-xs font-semibold text-[#990024] hover:underline"
+                >
+                  Try again
+                </button>
               </div>
             ) : notifications.length > 0 ? (
               notifications.map((notification) => (
@@ -216,6 +227,7 @@ export const NotificationBell = ({ onOpenSettings }) => {
                         <div className="flex items-center gap-1 flex-shrink-0">
                           {!notification.isRead && (
                             <button
+                              type="button"
                               onClick={(e) => handleMarkAsRead(notification.id, e)}
                               className="p-1 text-blue-600 hover:bg-blue-100 rounded transition-colors"
                               title="Mark as read"
@@ -224,6 +236,7 @@ export const NotificationBell = ({ onOpenSettings }) => {
                             </button>
                           )}
                           <button
+                            type="button"
                             onClick={(e) => handleDelete(notification.id, e)}
                             className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors"
                             title="Delete"
@@ -240,7 +253,7 @@ export const NotificationBell = ({ onOpenSettings }) => {
               <div className="p-8 text-center">
                 <Bell className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                 <p className="text-gray-500 text-sm font-medium">No notifications yet</p>
-                <p className="text-gray-400 text-xs mt-1">You'll be notified when tickets are claimed</p>
+                <p className="text-gray-400 text-xs mt-1">Assignments, status changes, comments and escalations will appear here.</p>
               </div>
             )}
           </div>
@@ -248,6 +261,7 @@ export const NotificationBell = ({ onOpenSettings }) => {
           {/* Footer */}
           <div className="border-t border-gray-200 bg-gray-50 p-3">
             <button
+              type="button"
               onClick={handleSettingsClick}
               className="w-full px-4 py-2 bg-white border-2 border-gray-200 text-gray-700 rounded-lg hover:border-[#911414] hover:text-[#911414] font-medium transition-all flex items-center justify-center gap-2"
             >

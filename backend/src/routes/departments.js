@@ -1,28 +1,28 @@
 const express = require('express');
 const router = express.Router();
 const departmentController = require('../controllers/departmentController');
-const { authenticateToken, requireAdmin, requireStaffOrAdmin } = require('../middleware/auth');
+const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 // All routes require authentication
 router.use(authenticateToken);
-router.use(requireStaffOrAdmin);
 
-// Get all departments
+// Read-Only Directory: Available to all authenticated users
 router.get('/', departmentController.getAllDepartments);
-
-// Sync directorates from Active Directory
-router.post('/sync/ad', requireAdmin, departmentController.syncDirectoratesFromAd);
-
-// Get single department
 router.get('/:id', departmentController.getDepartmentById);
 
-// Create department
-router.post('/', requireAdmin, departmentController.createDepartment);
+// AD Sync: Allowed strictly for administrators
+router.post('/sync/ad', requireAdmin, departmentController.syncDirectoratesFromAd);
 
-// Update department
-router.put('/:id', requireAdmin, departmentController.updateDepartment);
+// Local Mutations: Permanently disabled because AD is the authoritative source
+const disabledMutationHandler = (req, res) => {
+  res.status(405).json({
+    success: false,
+    message: 'Manual creation, editing, and deletion of directorates is disabled. Directorates are synchronized directly from Active Directory.'
+  });
+};
 
-// Delete department
-router.delete('/:id', requireAdmin, departmentController.deleteDepartment);
+router.post('/', disabledMutationHandler);
+router.put('/:id', disabledMutationHandler);
+router.delete('/:id', disabledMutationHandler);
 
 module.exports = router;

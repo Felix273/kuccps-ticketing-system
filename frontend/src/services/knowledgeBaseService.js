@@ -2,7 +2,11 @@ import { api } from './api';
 
 export const knowledgeBaseService = {
   getArticles(params = {}) {
-    const query = new URLSearchParams(params).toString();
+    // Filter out undefined/null/empty strings so URLSearchParams doesn't serialize 'undefined'
+    const cleanParams = Object.fromEntries(
+      Object.entries(params).filter(([_, v]) => v !== undefined && v !== null && v !== '' && v !== 'undefined')
+    );
+    const query = new URLSearchParams(cleanParams).toString();
     return api.get(`/knowledge-base/articles${query ? `?${query}` : ''}`);
   },
 
@@ -12,6 +16,34 @@ export const knowledgeBaseService = {
 
   createArticle(article) {
     return api.post('/knowledge-base/articles', article);
+  },
+
+  updateArticle(id, article) {
+    return api.put(`/knowledge-base/articles/${id}`, article);
+  },
+
+  deleteArticle(id) {
+    return api.delete(`/knowledge-base/articles/${id}`);
+  },
+
+  restoreArticle(id) {
+    return api.post(`/knowledge-base/articles/${id}/restore`, {});
+  },
+
+  approveArticle(id) {
+    return api.post(`/knowledge-base/articles/${id}/approve`, {});
+  },
+
+  getSearchGaps() {
+    return api.get('/knowledge-base/analytics/search-gaps');
+  },
+
+  getRevisions(id) {
+    return api.get(`/knowledge-base/articles/${id}/revisions`);
+  },
+
+  rateArticle(id, wasHelpful) {
+    return api.post(`/knowledge-base/articles/${id}/feedback`, { wasHelpful });
   },
 
   async uploadMaterial(file, metadata = {}) {
@@ -37,17 +69,5 @@ export const knowledgeBaseService = {
 
   getTicketSuggestions(ticketId) {
     return api.get(`/knowledge-base/suggestions/tickets/${ticketId}`);
-  },
-
-  updateArticle(id, article) {
-    return api.put(`/knowledge-base/articles/${id}`, article);
-  },
-
-  rateArticle(id, helpful) {
-    return api.post(`/knowledge-base/articles/${id}/rate`, { helpful });
-  },
-
-  deleteArticle(id) {
-    return api.delete(`/knowledge-base/articles/${id}`);
   }
 };

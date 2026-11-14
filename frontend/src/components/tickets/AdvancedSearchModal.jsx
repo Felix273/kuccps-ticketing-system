@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { PRIORITY_LEVELS, TICKET_STATUS } from '../../utils/constants';
 import { X, Search, Calendar, Filter } from 'lucide-react';
 
 export const AdvancedSearchModal = ({ onClose, onApply, departments, users }) => {
@@ -145,7 +146,7 @@ export const AdvancedSearchModal = ({ onClose, onApply, departments, users }) =>
             <div className="bg-white rounded-xl p-4 border-2 border-gray-200">
               <h4 className="font-semibold text-gray-900 mb-3">Status</h4>
               <div className="space-y-2">
-                {['Open', 'In Progress', 'Resolved', 'Closed'].map(status => (
+                {TICKET_STATUS.map(status => (
                   <label key={status} className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -163,7 +164,7 @@ export const AdvancedSearchModal = ({ onClose, onApply, departments, users }) =>
             <div className="bg-white rounded-xl p-4 border-2 border-gray-200">
               <h4 className="font-semibold text-gray-900 mb-3">Priority</h4>
               <div className="space-y-2">
-                {['Low', 'Medium', 'High', 'Critical'].map(priority => (
+                {PRIORITY_LEVELS.map(priority => (
                   <label key={priority} className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"

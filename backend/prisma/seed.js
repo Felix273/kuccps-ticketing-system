@@ -1,6 +1,7 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const { ensureDefaultRoles } = require('../src/services/accessControlService');
+const { seedSlaPolicies } = require('../src/services/slaService');
 
 const prisma = new PrismaClient();
 
@@ -45,6 +46,7 @@ async function main() {
   }
 
   await ensureDefaultRoles(prisma);
+  await seedSlaPolicies(prisma);
 
   const settingsCount = await prisma.systemSettings.count();
   if (settingsCount === 0) {
@@ -186,6 +188,8 @@ async function main() {
               <p style="color: #4b5563; font-size: 16px;">
                 If you're satisfied with the resolution, no further action is needed. If you need additional assistance, please reply to this email.
               </p>
+
+              {{csatLinks}}
 
               <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
                 Thank you for using {{emailFromName}}!

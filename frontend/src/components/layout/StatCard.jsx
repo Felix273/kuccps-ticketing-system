@@ -1,23 +1,43 @@
 import React from 'react';
-import { TrendingUp } from 'lucide-react';
+import { TrendingUp, TrendingDown } from 'lucide-react';
 
-export const StatCard = ({ icon, title, value, color, bgColor, subtitle, trend }) => {
-  const IconComponent = icon;
+export const StatCard = ({ icon: Icon, title, value, subtitle, trend, trendDirection = 'up' }) => {
   return (
-    <div className={`${bgColor} rounded-xl shadow-lg p-6 transform transition-all duration-200 hover:scale-105 hover:shadow-xl`}>
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-2">
-            <IconComponent className={`w-5 h-5 ${color}`} />
-            <p className="text-sm font-medium text-gray-600">{title}</p>
+    <div className="bg-white rounded-xl border border-slate-200/80 shadow-2xs p-5 hover:border-slate-300 transition-all">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+          {title}
+        </span>
+        {Icon && (
+          <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-600">
+            <Icon className="w-4 h-4" />
           </div>
-          <p className="text-3xl font-bold text-gray-900">{value}</p>
-          {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
+        )}
+      </div>
+
+      <div className="space-y-1">
+        <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+          {value}
+        </div>
+
+        <div className="flex items-center justify-between pt-1">
+          {subtitle && (
+            <p className="text-[11px] text-slate-400 font-medium">{subtitle}</p>
+          )}
+
           {trend && (
-            <div className="flex items-center gap-1 mt-2">
-              <TrendingUp className="w-3 h-3 text-green-500" />
-              <span className="text-xs text-green-600 font-medium">{trend}</span>
-            </div>
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+              trendDirection === 'down' 
+                ? 'bg-rose-50 text-rose-700 border border-rose-200/60' 
+                : 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+            }`}>
+              {trendDirection === 'down' ? (
+                <TrendingDown className="w-3 h-3" />
+              ) : (
+                <TrendingUp className="w-3 h-3" />
+              )}
+              {trend}
+            </span>
           )}
         </div>
       </div>

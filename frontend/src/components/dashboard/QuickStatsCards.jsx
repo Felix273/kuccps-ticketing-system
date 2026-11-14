@@ -34,25 +34,23 @@ export const QuickStatsCards = ({ tickets = [] }) => {
       ? Math.round(ticketsWithResponses.reduce((sum, t) => sum + (t.responseTime || 0), 0) / ticketsWithResponses.length / 60)
       : 0;
     
-    // SLA Compliance calculation
-    // SLA: Respond within 4 hours, Resolve within 24 hours
-    const SLA_RESPONSE_HOURS = 4;
-    const SLA_RESOLUTION_HOURS = 24;
-    
-    const ticketsInSLA = tickets.filter(t => {
-      if (t.status === 'Resolved' || t.status === 'Closed') {
-        // Check resolution time
-        const resolutionTime = t.resolutionTime || 0;
-        return resolutionTime <= SLA_RESOLUTION_HOURS * 60; // Convert to minutes
-      } else {
-        // Check response time for open tickets
-        const responseTime = t.responseTime || 0;
-        return responseTime <= SLA_RESPONSE_HOURS * 60;
+    const slaChecks = tickets.flatMap(ticket => {
+      const checks = [];
+      if (ticket.responseDueAt) {
+        checks.push(ticket.firstRespondedAt
+          ? new Date(ticket.firstRespondedAt) <= new Date(ticket.responseDueAt)
+          : now <= new Date(ticket.responseDueAt));
       }
-    }).length;
-    
-    const slaCompliance = tickets.length > 0 
-      ? Math.round((ticketsInSLA / tickets.length) * 100) 
+      if (ticket.slaDueAt) {
+        const completedAt = ticket.resolvedAt || (ticket.status === 'Closed' ? ticket.closedAt : null);
+        checks.push(completedAt
+          ? new Date(completedAt) <= new Date(ticket.slaDueAt)
+          : now <= new Date(ticket.slaDueAt));
+      }
+      return checks;
+    });
+    const slaCompliance = slaChecks.length
+      ? Math.round((slaChecks.filter(Boolean).length / slaChecks.length) * 100)
       : 100;
     
     // Yesterday's stats
@@ -94,7 +92,7 @@ export const QuickStatsCards = ({ tickets = [] }) => {
       color: 'from-green-500 to-green-600',
       bgLight: 'bg-green-50',
       textColor: 'text-green-700',
-      subtitle: 'tickets closed'
+      subtitle: 'tickets resolved'
     },
     {
       title: "Critical Open",

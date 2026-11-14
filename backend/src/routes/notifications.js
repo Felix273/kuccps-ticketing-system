@@ -2,10 +2,9 @@ const express = require('express');
 const router = express.Router();
 const { authenticateToken, requirePermission } = require('../middleware/auth');
 const { PrismaClient } = require('@prisma/client');
-const { createEmailTransporter, getSystemSettings } = require('../services/emailService');
+const { sendEmailNotification } = require('../services/notificationService');
 
 const prisma = new PrismaClient();
-const dismissedNotificationIds = new Map();
 
 const DEFAULT_PREFERENCES = {
   emailOnAssignment: true,
@@ -35,85 +34,91 @@ async function getOrCreatePreferences(userId) {
   });
 }
 
-function getDismissedSet(userId) {
-  if (!dismissedNotificationIds.has(userId)) {
-    dismissedNotificationIds.set(userId, new Set());
-  }
-  return dismissedNotificationIds.get(userId);
-}
-
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const preferences = await getOrCreatePreferences(req.user.id);
-    const overdueTickets = preferences.escalationAlerts
-      ? await prisma.ticket.findMany({
-          where: {
-            status: { in: ['Open', 'In Progress'] },
-            slaDueAt: { lt: new Date() }
-          },
-          take: 10,
-          orderBy: { slaDueAt: 'asc' },
-          select: {
-            id: true,
-            ticketNumber: true,
-            subject: true,
-            priority: true,
-            slaDueAt: true,
-            assignedToId: true
-          }
-        })
-      : [];
-
-    const notifications = overdueTickets
-      .filter(ticket => !ticket.assignedToId || ticket.assignedToId === req.user.id || req.user.role === 'admin')
-      .filter(ticket => !getDismissedSet(req.user.id).has(`overdue-${ticket.id}`))
-      .map(ticket => ({
-        id: `overdue-${ticket.id}`,
-        type: 'escalation',
-        title: `Overdue ticket ${ticket.ticketNumber}`,
-        message: `${ticket.subject} is past its turnaround time.`,
-        priority: ticket.priority,
-        createdAt: ticket.slaDueAt,
-        ticketId: ticket.id
-      }));
+    const unreadOnly = req.query.unreadOnly === 'true';
+    const where = {
+      userId: req.user.id,
+      ...(unreadOnly ? { isRead: false } : {})
+    };
+    const [notifications, unreadCount, count] = await Promise.all([
+      prisma.notification.findMany({
+        where,
+        include: { ticket: { select: { id: true, ticketNumber: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 50
+      }),
+      prisma.notification.count({
+        where: { userId: req.user.id, isRead: false }
+      }),
+      prisma.notification.count({
+        where: { userId: req.user.id }
+      })
+    ]);
 
     res.json({
       success: true,
       notifications,
-      count: notifications.length,
-      unreadCount: notifications.length
+      count,
+      unreadCount
     });
   } catch (error) {
     console.error('Get notifications error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch notifications',
-      notifications: [],
-      count: 0
     });
   }
 });
 
 router.put('/read/all', authenticateToken, async (req, res) => {
-  res.json({
-    success: true,
-    message: 'Notifications marked as read'
-  });
+  try {
+    const result = await prisma.notification.updateMany({
+      where: { userId: req.user.id, isRead: false },
+      data: { isRead: true }
+    });
+    res.json({
+      success: true,
+      message: 'Notifications marked as read',
+      updatedCount: result.count
+    });
+  } catch (error) {
+    console.error('Mark all notifications as read error:', error);
+    res.status(500).json({ success: false, message: 'Failed to update notifications' });
+  }
 });
 
 router.put('/:id/read', authenticateToken, async (req, res) => {
-  res.json({
-    success: true,
-    message: 'Notification marked as read'
-  });
+  try {
+    const result = await prisma.notification.updateMany({
+      where: { id: req.params.id, userId: req.user.id },
+      data: { isRead: true }
+    });
+    if (!result.count) {
+      const notification = await prisma.notification.findFirst({
+        where: { id: req.params.id, userId: req.user.id },
+        select: { id: true }
+      });
+      if (!notification) return res.status(404).json({ success: false, message: 'Notification not found' });
+    }
+    res.json({ success: true, message: 'Notification marked as read' });
+  } catch (error) {
+    console.error('Mark notification as read error:', error);
+    res.status(500).json({ success: false, message: 'Failed to update notification' });
+  }
 });
 
 router.delete('/:id', authenticateToken, async (req, res) => {
-  getDismissedSet(req.user.id).add(req.params.id);
-  res.json({
-    success: true,
-    message: 'Notification dismissed'
-  });
+  try {
+    const result = await prisma.notification.deleteMany({
+      where: { id: req.params.id, userId: req.user.id }
+    });
+    if (!result.count) return res.status(404).json({ success: false, message: 'Notification not found' });
+    res.json({ success: true, message: 'Notification dismissed' });
+  } catch (error) {
+    console.error('Delete notification error:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete notification' });
+  }
 });
 
 router.get('/preferences', authenticateToken, requirePermission('settings.notifications.view'), async (req, res) => {
@@ -167,25 +172,14 @@ router.put('/preferences', authenticateToken, requirePermission('settings.notifi
 
 router.post('/test', authenticateToken, requirePermission('settings.notifications.test'), async (req, res) => {
   try {
-    const settings = await getSystemSettings();
-    const transporter = await createEmailTransporter();
     const to = req.user.email;
-
     if (!to) {
       return res.status(400).json({ success: false, message: 'Your account has no email address' });
     }
 
-    await transporter.sendMail({
-      from: `${settings.emailFromName} <${settings.supportEmail || process.env.EMAIL_USER}>`,
-      to,
-      subject: 'KUCCPS IT Support notification test',
-      html: `
-        <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
-          <h2 style="color: ${settings.primaryColor || '#911414'};">Notification test successful</h2>
-          <p>Hello ${req.user.name || 'there'},</p>
-          <p>This confirms your KUCCPS IT Support email notifications can be sent to this address.</p>
-        </div>
-      `
+    await sendEmailNotification(to, {
+      title: 'Notification test successful',
+      message: `Hello ${req.user.name || 'there'}, this confirms that email notifications can be sent to your account.`
     });
 
     res.json({ success: true, message: 'Test email sent' });

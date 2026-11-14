@@ -4,7 +4,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 export const ResolutionRateChart = ({ data }) => (
   <div className="bg-white rounded-xl shadow-lg p-6">
     <h3 className="text-lg font-semibold text-gray-900 mb-6">Resolution Rate Trend</h3>
-    <ResponsiveContainer width="100%" height={280}>
+    <ResponsiveContainer width="100%" height={280} initialDimension={{ width: 400, height: 280 }}>
       <AreaChart data={data}>
         <defs>
           <linearGradient id="colorRate" x1="0" y1="0" x2="0" y2="1">

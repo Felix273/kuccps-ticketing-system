@@ -1,13 +1,44 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Mail, Calendar, User, Clock, AlertCircle, CheckCircle, Tag, Building2, MessageSquare, Send, Paperclip, Check, XCircle, PlayCircle, RotateCcw, ChevronDown, ChevronRight, ShieldCheck, Sparkles, BookOpen, ArrowUpRight } from 'lucide-react';
+import { 
+  X, 
+  Mail, 
+  Calendar, 
+  User, 
+  Clock, 
+  AlertCircle, 
+  CheckCircle2, 
+  Tag, 
+  Building2, 
+  MessageSquare, 
+  Send, 
+  Paperclip, 
+  Check, 
+  XCircle, 
+  PlayCircle, 
+  RotateCcw, 
+  ChevronDown, 
+  ChevronRight, 
+  ShieldCheck, 
+  Sparkles, 
+  BookOpen, 
+  ArrowUpRight 
+} from 'lucide-react';
 import { ticketService } from '../../services/ticketService';
+import { normalizePriority } from '../../utils/constants';
 import { knowledgeBaseService } from '../../services/knowledgeBaseService';
+
+function formatSlaDeadline(value) {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: 'Africa/Nairobi',
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  }).format(new Date(value));
+}
 
 export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, users = [] }) => {
   const [activeTab, setActiveTab] = useState('details');
   const [replyText, setReplyText] = useState('');
   const [isInternal, setIsInternal] = useState(false);
-  const [collapsedThreads, setCollapsedThreads] = useState({});
   const fileInputRef = useRef(null);
   const [isSending, setIsSending] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -31,55 +62,25 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
         setSuggestionsLoading(false);
       }
     };
-    const timer = setTimeout(loadSuggestions, 0);
-    return () => clearTimeout(timer);
+    loadSuggestions();
   }, [ticket.id]);
 
-  const getPriorityColor = (priority) => {
-    const colors = {
-      Low: 'bg-green-100 text-green-700 border-green-300',
-      Medium: 'bg-yellow-100 text-yellow-700 border-yellow-300',
-      High: 'bg-orange-100 text-orange-700 border-orange-300',
-      Critical: 'bg-red-100 text-red-700 border-red-300'
-    };
-    return colors[priority] || colors.Medium;
-  };
-
-  const getStatusColor = (status) => {
-    const colors = {
-      Open: 'bg-blue-100 text-blue-700 border-blue-300',
-      'In Progress': 'bg-purple-100 text-purple-700 border-purple-300',
-      Resolved: 'bg-green-100 text-green-700 border-green-300',
-      Closed: 'bg-gray-100 text-gray-700 border-gray-300'
-    };
-    return colors[status] || colors.Open;
-  };
-
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'Open': return <AlertCircle className="w-5 h-5" />;
-      case 'In Progress': return <Clock className="w-5 h-5" />;
-      case 'Resolved':
-      case 'Closed': return <CheckCircle className="w-5 h-5" />;
-      default: return <AlertCircle className="w-5 h-5" />;
-    }
-  };
-
   const handleStatusUpdate = async (newStatus) => {
-    if (!confirm(`Are you sure you want to change status to "${newStatus}"?`)) {
-      return;
-    }
-
+    const confirmation = newStatus === 'On Hold'
+      ? 'Put this ticket On Hold while waiting for a dependency or information?'
+      : newStatus === 'Resolved'
+        ? 'Mark this ticket Resolved? The requester will receive a satisfaction rating link.'
+        : newStatus === 'Closed'
+          ? 'Close this resolved ticket? It will move from Resolved to Closed.'
+          : `Are you sure you want to update ticket status to ${newStatus}?`;
+    if (!confirm(confirmation)) return;
     setIsUpdating(true);
     try {
       const result = newStatus === 'In Progress' && currentUser?.id
         ? await ticketService.startWorking(ticket.id, currentUser.id)
         : await ticketService.updateStatus(ticket.id, newStatus);
       if (result.success) {
-        alert(`Ticket status updated to ${newStatus}`);
-        if (onUpdate) {
-          await onUpdate();
-        }
+        if (onUpdate) await onUpdate();
         onClose();
       } else {
         alert(result.message || 'Failed to update status');
@@ -97,7 +98,6 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
       alert('Please choose an officer to escalate to.');
       return;
     }
-
     setIsEscalating(true);
     try {
       const result = await ticketService.escalate(ticket.id, {
@@ -105,9 +105,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
         escalationType,
         reason: escalationReason
       });
-
       if (result.success) {
-        alert('Ticket escalated successfully');
         if (onUpdate) await onUpdate();
         onClose();
       } else {
@@ -123,21 +121,16 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
 
   const handleSendReply = async () => {
     if (!replyText.trim()) return;
-    
     setIsSending(true);
     try {
       const result = await ticketService.addComment(ticket.id, {
         content: replyText,
         isInternal
       });
-      
       if (result.success) {
         setReplyText('');
         setIsInternal(false);
-        alert('Reply sent successfully');
-        if (onUpdate) {
-          await onUpdate();
-        }
+        if (onUpdate) await onUpdate();
       }
     } catch (error) {
       console.error('Error sending reply:', error);
@@ -153,7 +146,6 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
     try {
       const result = await ticketService.addAttachment(ticket.id, file);
       if (result.success) {
-        alert('Attachment uploaded');
         if (onUpdate) await onUpdate();
       } else {
         alert(result.message || 'Failed to upload attachment');
@@ -166,66 +158,88 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
     }
   };
 
-  // Status action buttons based on current status
   const getStatusActions = () => {
     const actions = [];
-    
     switch (ticket.status) {
       case 'Open':
         actions.push({
           label: 'Start Working',
           status: 'In Progress',
-          icon: <PlayCircle className="w-4 h-4" />,
-          color: 'bg-purple-600 hover:bg-purple-700'
+          icon: <PlayCircle className="w-3.5 h-3.5" />,
+          isPrimary: false
         });
         actions.push({
-          label: 'Resolve',
-          status: 'Resolved',
-          icon: <Check className="w-4 h-4" />,
-          color: 'bg-green-600 hover:bg-green-700'
+          label: 'Put On Hold',
+          status: 'On Hold',
+          icon: <Clock className="w-3.5 h-3.5" />,
+          isPrimary: false
         });
-        break;
-        
-      case 'In Progress':
         actions.push({
           label: 'Resolve Ticket',
           status: 'Resolved',
-          icon: <Check className="w-4 h-4" />,
-          color: 'bg-green-600 hover:bg-green-700'
+          icon: <Check className="w-3.5 h-3.5" />,
+          isPrimary: true
         });
+        break;
+      case 'In Progress':
         actions.push({
           label: 'Reopen',
           status: 'Open',
-          icon: <RotateCcw className="w-4 h-4" />,
-          color: 'bg-blue-600 hover:bg-blue-700'
+          icon: <RotateCcw className="w-3.5 h-3.5" />,
+          isPrimary: false
+        });
+        actions.push({
+          label: 'Put On Hold',
+          status: 'On Hold',
+          icon: <Clock className="w-3.5 h-3.5" />,
+          isPrimary: false
+        });
+        actions.push({
+          label: 'Resolve Ticket',
+          status: 'Resolved',
+          icon: <Check className="w-3.5 h-3.5" />,
+          isPrimary: true
         });
         break;
-        
+      case 'On Hold':
+        actions.push({
+          label: 'Resume Work',
+          status: 'In Progress',
+          icon: <PlayCircle className="w-3.5 h-3.5" />,
+          isPrimary: false
+        });
+        actions.push({
+          label: 'Resolve Ticket',
+          status: 'Resolved',
+          icon: <Check className="w-3.5 h-3.5" />,
+          isPrimary: true
+        });
+        break;
       case 'Resolved':
+        actions.push({
+          label: 'Reopen',
+          status: 'Open',
+          icon: <RotateCcw className="w-3.5 h-3.5" />,
+          isPrimary: false
+        });
         actions.push({
           label: 'Close Ticket',
           status: 'Closed',
-          icon: <XCircle className="w-4 h-4" />,
-          color: 'bg-gray-600 hover:bg-gray-700'
-        });
-        actions.push({
-          label: 'Reopen',
-          status: 'Open',
-          icon: <RotateCcw className="w-4 h-4" />,
-          color: 'bg-blue-600 hover:bg-blue-700'
+          icon: <XCircle className="w-3.5 h-3.5" />,
+          isPrimary: true
         });
         break;
-        
       case 'Closed':
         actions.push({
           label: 'Reopen Ticket',
           status: 'Open',
-          icon: <RotateCcw className="w-4 h-4" />,
-          color: 'bg-blue-600 hover:bg-blue-700'
+          icon: <RotateCcw className="w-3.5 h-3.5" />,
+          isPrimary: false
         });
         break;
+      default:
+        break;
     }
-    
     return actions;
   };
 
@@ -251,10 +265,6 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
     }))
   ];
 
-  const toggleThread = (id) => {
-    setCollapsedThreads(prev => ({ ...prev, [id]: !prev[id] }));
-  };
-
   const statusActions = getStatusActions();
   const escalationTargets = users.filter(user =>
     user.role !== 'user' &&
@@ -263,199 +273,247 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
   );
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-[#911414] to-[#d20001] text-white p-6">
-          <div className="flex justify-between items-start mb-4">
-            <div className="flex-1">
-              <div className="flex items-center gap-3 mb-2 flex-wrap">
-                <span className="text-sm font-mono bg-white/20 px-3 py-1 rounded">
-                  {ticket.ticketNumber}
+    <div className="fixed inset-0 bg-zinc-950/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl border border-zinc-200 shadow-2xl max-w-5xl w-full max-h-[92vh] overflow-hidden flex flex-col font-sans">
+        
+        {/* 1. CRAFT HEADER (No Solid Red Canvas) */}
+        <div className="p-5 sm:p-6 border-b border-zinc-200 bg-white">
+          <div className="flex items-start justify-between gap-4 mb-2">
+            
+            {/* Breadcrumb + Status & Priority Dots */}
+            <div className="space-y-1.5 flex-1 min-w-0">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="font-mono text-xs text-zinc-400">
+                  Tickets / <strong className="text-zinc-900 font-bold">#{ticket.ticketNumber}</strong>
                 </span>
-                <span className={`px-3 py-1 rounded-lg border-2 font-medium text-sm flex items-center gap-2 ${getPriorityColor(ticket.priority)}`}>
-                  <AlertCircle className="w-4 h-4" />
-                  {ticket.priority}
-                </span>
-                <span className={`px-3 py-1 rounded-lg border-2 font-medium text-sm flex items-center gap-2 ${getStatusColor(ticket.status)}`}>
-                  {getStatusIcon(ticket.status)}
+
+                <div className="h-3 w-[1px] bg-zinc-200"></div>
+
+                {/* Linear Status Indicator */}
+                <span className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold px-2 py-0.5 rounded border border-zinc-200 bg-zinc-50 text-zinc-700">
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    ticket.status === 'Resolved' ? 'bg-emerald-500' :
+                    ticket.status === 'In Progress' ? 'bg-amber-500 animate-pulse' :
+                    ticket.status === 'Open' ? 'bg-blue-500' :
+                    ticket.status === 'On Hold' ? 'bg-orange-500' : 'bg-zinc-400'
+                  }`}></span>
                   {ticket.status}
                 </span>
+
+                {/* Linear Priority Indicator */}
+                <span className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold px-2 py-0.5 rounded border border-zinc-200 bg-zinc-50 text-zinc-700">
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    ticket.priority === 'Critical' || ticket.priority === 'Very High' ? 'bg-rose-500 animate-pulse' :
+                    ticket.priority === 'High' ? 'bg-amber-500' : 'bg-zinc-400'
+                  }`}></span>
+                  {normalizePriority(ticket.priority) || 'Normal'}
+                </span>
               </div>
-              <h2 className="text-2xl font-bold">{ticket.subject}</h2>
+
+              {/* Ticket Subject */}
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900 leading-snug truncate">
+                {ticket.subject}
+              </h2>
             </div>
+
+            {/* Close Button */}
             <button
               onClick={onClose}
-              className="text-white hover:bg-white/20 rounded-lg p-2 transition-colors ml-4"
+              className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors cursor-pointer shrink-0"
+              title="Close (Esc)"
             >
-              <X className="w-6 h-6" />
+              <X className="w-5 h-5" />
             </button>
           </div>
 
-          {/* Quick Info */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div className="flex items-center gap-2">
-              <Mail className="w-4 h-4 text-white/80" />
-              <div>
-                <p className="text-white/70 text-xs">From</p>
-                <p className="font-medium truncate">{ticket.requesterEmail}</p>
-              </div>
+          {/* Precision Metadata Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 mt-3 border-t border-zinc-100 text-xs">
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Requester</p>
+              <p className="font-mono text-zinc-800 font-medium truncate mt-0.5">{ticket.requesterEmail}</p>
             </div>
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-white/80" />
-              <div>
-                <p className="text-white/70 text-xs">Created</p>
-                <p className="font-medium">{new Date(ticket.createdAt).toLocaleDateString()}</p>
-              </div>
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Created Date</p>
+              <p className="font-mono text-zinc-800 font-medium mt-0.5 tabular-nums">
+                {new Date(ticket.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </p>
             </div>
-            <div className="flex items-center gap-2">
-              <User className="w-4 h-4 text-white/80" />
-              <div>
-                <p className="text-white/70 text-xs">Claimed By</p>
-                <p className="font-medium truncate">{ticket.assignedTo?.name || 'Unclaimed'}</p>
-              </div>
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Claimed By</p>
+              <p className="font-mono text-zinc-800 font-medium truncate mt-0.5">
+                {ticket.assignedTo?.name || 'Unassigned'}
+              </p>
             </div>
-            <div className="flex items-center gap-2">
-              <Tag className="w-4 h-4 text-white/80" />
-              <div>
-                <p className="text-white/70 text-xs">Category</p>
-                <p className="font-medium">{ticket.category}</p>
-              </div>
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-wider text-zinc-400 font-semibold">Category</p>
+              <p className="font-mono text-zinc-800 font-medium truncate mt-0.5">{ticket.category || 'General Support'}</p>
             </div>
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="border-b border-gray-200 bg-gray-50 px-6">
+        {/* 2. SEGMENTED TABS */}
+        <div className="border-b border-zinc-200 bg-zinc-50/60 px-6">
           <div className="flex gap-6">
             <button
               onClick={() => setActiveTab('details')}
-              className={`py-4 px-2 font-medium text-sm border-b-2 transition-colors ${
+              className={`py-3 font-mono text-xs font-semibold border-b-2 transition-all cursor-pointer ${
                 activeTab === 'details'
-                  ? 'border-[#911414] text-[#911414]'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-[#990024] text-zinc-900'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-800'
               }`}
             >
-              Details
+              Overview & Triage
             </button>
             <button
               onClick={() => setActiveTab('thread')}
-              className={`py-4 px-2 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 ${
+              className={`py-3 font-mono text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${
                 activeTab === 'thread'
-                  ? 'border-[#911414] text-[#911414]'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-[#990024] text-zinc-900'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-800'
               }`}
             >
-              <Mail className="w-4 h-4" />
-              Email Thread ({emailThread.length})
+              <Mail className="w-3.5 h-3.5" />
+              <span>Email Thread</span>
+              <span className="px-1.5 py-0.2 rounded bg-zinc-200 text-zinc-700 text-[10px] tabular-nums font-bold">
+                {emailThread.length}
+              </span>
             </button>
             <button
               onClick={() => setActiveTab('activity')}
-              className={`py-4 px-2 font-medium text-sm border-b-2 transition-colors ${
+              className={`py-3 font-mono text-xs font-semibold border-b-2 transition-all cursor-pointer ${
                 activeTab === 'activity'
-                  ? 'border-[#911414] text-[#911414]'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-[#990024] text-zinc-900'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-800'
               }`}
             >
-              Activity Log
+              Audit Trail
             </button>
           </div>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        {/* 3. CONTENT AREA */}
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
+          
           {activeTab === 'details' && (
-            <div className="space-y-6">
-              {/* Description */}
-              <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
-                <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                  <MessageSquare className="w-5 h-5 text-[#911414]" />
-                  Description
-                </h3>
-                <div className="prose prose-sm max-w-none">
-                  <p className="text-gray-700 whitespace-pre-wrap">{ticket.description}</p>
+            <div className="space-y-5">
+              
+              {/* Description Box */}
+              <div className="bg-zinc-50/70 rounded-lg p-5 border border-zinc-200">
+                <div className="flex items-center gap-2 mb-2 font-mono text-[11px] uppercase tracking-wider text-zinc-500 font-bold">
+                  <MessageSquare className="w-3.5 h-3.5 text-[#990024]" />
+                  <span>Requester Problem Statement</span>
+                </div>
+                <div className="text-zinc-800 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap font-sans">
+                  {ticket.description || 'No description provided.'}
                 </div>
               </div>
 
-              <div className="bg-indigo-50 rounded-xl p-6 border-2 border-indigo-200">
-                <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-indigo-700" />
-                  AI Knowledge Suggestions
+              <section className={`rounded-lg border p-4 ${ticket.isOverdue ? 'border-rose-200 bg-rose-50/70' : 'border-zinc-200 bg-white'}`}>
+                <h3 className="mb-3 flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wider text-zinc-700">
+                  <Clock className="h-3.5 w-3.5 text-[#990024]" />
+                  SLA deadlines (Africa/Nairobi)
                 </h3>
+                <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
+                  {ticket.responseDueAt && (
+                    <div>
+                      <p className="text-zinc-500">First response due</p>
+                      <p className="mt-1 font-semibold text-zinc-900">{formatSlaDeadline(ticket.responseDueAt)}</p>
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-zinc-500">Resolution due</p>
+                    <p className="mt-1 font-semibold text-zinc-900">
+                      {ticket.slaDueAt
+                        ? formatSlaDeadline(ticket.slaDueAt)
+                        : ticket.category === 'Software Development'
+                          ? 'Per approved specification (no numeric default)'
+                          : 'No numeric SLA timeline configured for this category'}
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              {/* Diagnostic AI Knowledge Suggestions */}
+              <div className="bg-white rounded-lg p-5 border border-zinc-200 space-y-4">
+                <div className="flex items-center justify-between border-b border-zinc-100 pb-2.5">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Sparkles className="w-4 h-4 text-[#990024]" />
+                    <span className="font-mono text-xs font-bold uppercase tracking-wider text-zinc-900">
+                      Operational Triage & Knowledge Suggestions
+                    </span>
+                  </div>
+                  <span className="font-mono text-[10px] text-zinc-400">TELEMETRY_ASSIST</span>
+                </div>
+
                 {suggestionsLoading ? (
-                  <p className="text-sm text-indigo-800">Analyzing ticket against knowledge base and ticket history...</p>
+                  <p className="font-mono text-xs text-zinc-400">Scanning knowledge articles and similar tickets...</p>
                 ) : suggestions ? (
                   <div className="space-y-4">
-                    <p className="text-sm text-indigo-900">{suggestions.summary}</p>
+                    <p className="text-xs text-zinc-600 font-sans leading-relaxed">
+                      {suggestions.summary}
+                    </p>
+
+                    {/* Recommended Actions */}
                     <div>
-                      <h4 className="font-semibold text-gray-900 mb-2">Recommended actions</h4>
-                      <ul className="space-y-2">
-                        {suggestions.recommendedActions.map((action, index) => (
-                          <li key={index} className="text-sm text-gray-700 flex gap-2">
-                            <CheckCircle className="w-4 h-4 text-indigo-600 flex-shrink-0 mt-0.5" />
+                      <h4 className="font-mono text-[11px] font-bold uppercase tracking-wider text-zinc-700 mb-2">
+                        Recommended Actions
+                      </h4>
+                      <div className="space-y-1.5 font-mono text-xs">
+                        {suggestions.recommendedActions?.map((action, index) => (
+                          <div key={index} className="flex items-start gap-2 text-zinc-700">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
                             <span>{action}</span>
-                          </li>
+                          </div>
                         ))}
-                      </ul>
+                      </div>
                     </div>
+
+                    {/* 3 Hairline Diagnostic Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="bg-white rounded-lg border border-indigo-100 p-3">
-                        <h4 className="font-semibold text-gray-900 mb-2">Missing Details</h4>
+                      <div className="bg-zinc-50/60 rounded border border-zinc-200 p-3 text-xs font-mono">
+                        <span className="text-[10px] uppercase font-bold text-zinc-500 block mb-1">Missing Details</span>
                         {suggestions.missingInfo?.length > 0 ? (
-                          <ul className="space-y-1">
+                          <div className="space-y-1 text-zinc-700">
                             {suggestions.missingInfo.map(item => (
-                              <li key={item} className="text-sm text-gray-700 flex gap-2">
-                                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                                <span>{item}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="text-sm text-gray-600">Basic triage details look sufficient.</p>
-                        )}
-                      </div>
-                      <div className="bg-white rounded-lg border border-indigo-100 p-3">
-                        <h4 className="font-semibold text-gray-900 mb-2">Priority Check</h4>
-                        <p className="text-sm text-gray-700">
-                          Current: <span className="font-semibold">{suggestions.priorityAssessment?.current || ticket.priority}</span>
-                        </p>
-                        <p className="text-sm text-gray-700">
-                          Suggested: <span className="font-semibold">{suggestions.priorityAssessment?.suggested || ticket.priority}</span>
-                        </p>
-                        {suggestions.priorityAssessment?.shouldReview && (
-                          <p className="text-xs text-amber-700 mt-2">Review priority before continuing.</p>
-                        )}
-                      </div>
-                      <div className="bg-white rounded-lg border border-indigo-100 p-3">
-                        <h4 className="font-semibold text-gray-900 mb-2">Similar Active Tickets</h4>
-                        {suggestions.similarTickets?.length > 0 ? (
-                          <div className="space-y-2">
-                            {suggestions.similarTickets.slice(0, 3).map(item => (
-                              <div key={item.ticketNumber} className="text-sm">
-                                <p className="font-semibold text-gray-900">{item.ticketNumber}</p>
-                                <p className="text-gray-600 truncate">{item.subject}</p>
-                              </div>
+                              <p key={item}>• {item}</p>
                             ))}
                           </div>
                         ) : (
-                          <p className="text-sm text-gray-600">No likely duplicate active ticket found.</p>
+                          <p className="text-zinc-500">Triage details look complete.</p>
+                        )}
+                      </div>
+
+                      <div className="bg-zinc-50/60 rounded border border-zinc-200 p-3 text-xs font-mono">
+                        <span className="text-[10px] uppercase font-bold text-zinc-500 block mb-1">Priority Assessment</span>
+                        <p className="text-zinc-700">Current: <strong>{normalizePriority(ticket.priority)}</strong></p>
+                        <p className="text-zinc-700">Suggested: <strong className="text-[#990024]">{normalizePriority(suggestions.priorityAssessment?.suggested || ticket.priority)}</strong></p>
+                      </div>
+
+                      <div className="bg-zinc-50/60 rounded border border-zinc-200 p-3 text-xs font-mono">
+                        <span className="text-[10px] uppercase font-bold text-zinc-500 block mb-1">Similar Active Incidents</span>
+                        {suggestions.similarTickets?.length > 0 ? (
+                          <div className="space-y-1 text-zinc-700 truncate">
+                            {suggestions.similarTickets.slice(0, 2).map(item => (
+                              <p key={item.ticketNumber} className="truncate">#{item.ticketNumber}: {item.subject}</p>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-zinc-500">No duplicate incidents detected.</p>
                         )}
                       </div>
                     </div>
-                    {suggestions.articles.length > 0 && (
+
+                    {/* Related Knowledge Articles */}
+                    {suggestions.articles?.length > 0 && (
                       <div>
-                        <h4 className="font-semibold text-gray-900 mb-2">Related knowledge</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <h4 className="font-mono text-[11px] font-bold uppercase tracking-wider text-zinc-700 mb-2">
+                          Referenced SOPs & Procedures
+                        </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                           {suggestions.articles.map(article => (
-                            <div key={article.id} className="bg-white rounded-lg border border-indigo-100 p-3">
-                              <div className="flex items-start gap-2">
-                                <BookOpen className="w-4 h-4 text-indigo-600 flex-shrink-0 mt-1" />
-                                <div>
-                                  <p className="font-medium text-gray-900">{article.title}</p>
-                                  <p className="text-xs text-gray-500">{article.category}</p>
-                                  <p className="text-sm text-gray-600 mt-1 line-clamp-3">{article.excerpt}</p>
-                                </div>
-                              </div>
+                            <div key={article.id} className="p-2.5 rounded border border-zinc-200 bg-zinc-50/60 text-xs">
+                              <p className="font-bold text-zinc-900">{article.title}</p>
+                              <p className="text-zinc-500 line-clamp-2 mt-0.5">{article.excerpt}</p>
                             </div>
                           ))}
                         </div>
@@ -463,114 +521,71 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
                     )}
                   </div>
                 ) : (
-                  <p className="text-sm text-indigo-800">No suggestions available yet. Add more knowledge-base articles to improve recommendations.</p>
+                  <p className="font-mono text-xs text-zinc-400">No automated suggestions triggered for this category.</p>
                 )}
               </div>
 
-              {/* Additional Info Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Requester Info */}
-                <div className="bg-white rounded-xl p-4 border-2 border-gray-200">
-                  <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <User className="w-4 h-4 text-[#911414]" />
-                    Requester Information
-                  </h4>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Email:</span>
-                      <span className="font-medium text-gray-900">{ticket.requesterEmail}</span>
-                    </div>
-                    {ticket.requesterName && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Name:</span>
-                        <span className="font-medium text-gray-900">{ticket.requesterName}</span>
-                      </div>
-                    )}
+              {/* Escalation & Information Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                
+                {/* Officer Escalation */}
+                <div className="p-4 rounded-lg border border-zinc-200 bg-white">
+                  <div className="flex items-center gap-2 mb-2 font-mono text-[11px] font-bold uppercase text-zinc-700">
+                    <ArrowUpRight className="w-3.5 h-3.5 text-[#990024]" />
+                    <span>Officer Escalation</span>
                   </div>
-                </div>
 
-                {/* Claim Info */}
-                <div className="bg-white rounded-xl p-4 border-2 border-gray-200">
-                  <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <Building2 className="w-4 h-4 text-[#911414]" />
-                    Claim Details
-                  </h4>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Claimed By:</span>
-                      <span className="font-medium text-gray-900">
-                        {ticket.assignedTo?.name || 'Unclaimed'}
-                      </span>
-                    </div>
-                    {ticket.department && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Department:</span>
-                        <span className="font-medium text-gray-900">{ticket.department.name}</span>
-                      </div>
-                    )}
-                    {ticket.assignedTo?.department && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Staff Department:</span>
-                        <span className="font-medium text-gray-900">{ticket.assignedTo.department}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Escalation */}
-                <div className="bg-white rounded-xl p-4 border-2 border-gray-200">
-                  <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <ArrowUpRight className="w-4 h-4 text-[#911414]" />
-                    Escalation
-                  </h4>
                   {!showEscalation ? (
                     <button
                       onClick={() => setShowEscalation(true)}
                       disabled={['Resolved', 'Closed'].includes(ticket.status)}
-                      className="w-full px-4 py-2 bg-[#911414] text-white rounded-lg hover:bg-[#ac0807] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-3 py-1.5 text-xs font-mono font-semibold border border-zinc-200 rounded hover:bg-zinc-50 text-zinc-700 transition-colors cursor-pointer disabled:opacity-50"
                     >
-                      Escalate Ticket
+                      Escalate Ticket To Officer
                     </button>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-2 text-xs font-mono">
                       <select
                         value={escalationType}
                         onChange={(e) => setEscalationType(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#911414] focus:border-transparent"
+                        className="w-full px-2 py-1 bg-zinc-50 border border-zinc-200 rounded"
                       >
-                        <option value="horizontal">Horizontal - Peer Officer</option>
-                        <option value="vertical">Vertical - Senior Officer</option>
+                        <option value="horizontal">Horizontal (Peer Officer)</option>
+                        <option value="vertical">Vertical (Senior Lead)</option>
                       </select>
+
                       <select
                         value={targetUserId}
                         onChange={(e) => setTargetUserId(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#911414] focus:border-transparent"
+                        className="w-full px-2 py-1 bg-zinc-50 border border-zinc-200 rounded"
                       >
-                        <option value="">Select officer</option>
+                        <option value="">Select target officer</option>
                         {escalationTargets.map(user => (
                           <option key={user.id} value={user.id}>
-                            {user.name} {user.department?.name ? `- ${user.department.name}` : ''}
+                            {user.name} ({user.department?.name || 'Staff'})
                           </option>
                         ))}
                       </select>
+
                       <textarea
                         value={escalationReason}
                         onChange={(e) => setEscalationReason(e.target.value)}
-                        rows={3}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#911414] focus:border-transparent resize-none"
-                        placeholder="Reason for escalation"
+                        rows={2}
+                        placeholder="Reason for escalation..."
+                        className="w-full px-2 py-1 bg-zinc-50 border border-zinc-200 rounded font-sans"
                       />
+
                       <div className="flex gap-2">
                         <button
                           onClick={handleEscalate}
                           disabled={isEscalating || !targetUserId}
-                          className="flex-1 px-4 py-2 bg-[#911414] text-white rounded-lg hover:bg-[#ac0807] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="px-3 py-1 bg-[#990024] text-white rounded text-xs font-semibold"
                         >
                           {isEscalating ? 'Escalating...' : 'Confirm'}
                         </button>
                         <button
                           onClick={() => setShowEscalation(false)}
-                          className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium transition-colors"
+                          className="px-3 py-1 border border-zinc-200 rounded text-xs text-zinc-600"
                         >
                           Cancel
                         </button>
@@ -579,206 +594,109 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
                   )}
                 </div>
 
-                {/* Timestamps */}
-                <div className="bg-white rounded-xl p-4 border-2 border-gray-200">
-                  <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-[#911414]" />
-                    Timeline
-                  </h4>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Created:</span>
-                      <span className="font-medium text-gray-900">
-                        {new Date(ticket.createdAt).toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Last Updated:</span>
-                      <span className="font-medium text-gray-900">
-                        {new Date(ticket.updatedAt).toLocaleString()}
-                      </span>
-                    </div>
-                    {ticket.resolvedAt && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Resolved:</span>
-                        <span className="font-medium text-green-600">
-                          {new Date(ticket.resolvedAt).toLocaleString()}
-                        </span>
-                      </div>
-                    )}
+                {/* Directorate & Email Context */}
+                <div className="p-4 rounded-lg border border-zinc-200 bg-white space-y-2 text-xs font-mono">
+                  <div className="flex items-center gap-2 font-bold uppercase text-zinc-700 mb-1">
+                    <Building2 className="w-3.5 h-3.5 text-zinc-500" />
+                    <span>Routing Context</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">Department:</span>
+                    <span className="font-semibold text-zinc-800">{ticket.department?.name || 'Unassigned'}</span>
+                  </div>
+                  {ticket.emailMessageId && (
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500">Intake Source:</span>
+                      <span className="text-blue-700 font-semibold">Inbound SMTP</span>
+                    </div>
+                  )}
                 </div>
 
-                {/* Email Info */}
-                {ticket.emailMessageId && (
-                  <div className="bg-blue-50 rounded-xl p-4 border-2 border-blue-200">
-                    <h4 className="font-semibold text-blue-900 mb-3 flex items-center gap-2">
-                      <Mail className="w-4 h-4 text-blue-600" />
-                      Email Information
-                    </h4>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="w-4 h-4 text-green-600" />
-                        <span className="text-blue-800">Created from email</span>
-                      </div>
-                      <p className="text-xs text-blue-600 font-mono break-all">
-                        {ticket.emailMessageId}
-                      </p>
-                    </div>
-                  </div>
-                )}
               </div>
 
-              {ticket.attachments?.length > 0 && (
-                <div className="bg-white rounded-xl p-4 border-2 border-gray-200">
-                  <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    <Paperclip className="w-4 h-4 text-[#911414]" />
-                    Attachments
-                  </h4>
-                  <div className="space-y-2">
-                    {ticket.attachments.map(attachment => (
-                      <div key={attachment.id} className="flex justify-between items-center text-sm bg-gray-50 rounded-lg p-3">
-                        <span className="font-medium text-gray-800">{attachment.filename}</span>
-                        <span className="text-gray-500">{Math.round(attachment.size / 1024)} KB</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
           {activeTab === 'thread' && (
             <div className="space-y-4">
-              {/* Email Thread */}
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {emailThread.map((email) => (
                   <div
                     key={email.id}
-                    className={`rounded-xl p-6 border-2 ${
+                    className={`rounded-lg p-4 border text-xs font-sans ${
                       email.type === 'internal'
-                        ? 'bg-amber-50 border-amber-200 mx-6'
-                        : email.type === 'received'
-                        ? 'bg-white border-gray-200 ml-0 mr-12'
-                        : 'bg-blue-50 border-blue-200 ml-12 mr-0'
+                        ? 'bg-amber-50/70 border-amber-200'
+                        : 'bg-white border-zinc-200'
                     }`}
                   >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                          email.type === 'internal'
-                            ? 'bg-gradient-to-br from-amber-500 to-orange-600'
-                            : email.type === 'received'
-                            ? 'bg-gradient-to-br from-gray-400 to-gray-600'
-                            : 'bg-gradient-to-br from-[#911414] to-[#d20001]'
-                        }`}>
-                          {email.type === 'internal'
-                            ? <ShieldCheck className="w-5 h-5 text-white" />
-                            : <Mail className="w-5 h-5 text-white" />}
-                        </div>
-                        <div>
-                          <p className="font-semibold text-gray-900">
-                            {email.fromName || email.from}
-                            {email.isInternal && (
-                              <span className="ml-2 px-2 py-1 bg-amber-100 text-amber-800 text-xs rounded">
-                                Internal note
-                              </span>
-                            )}
-                          </p>
-                          <p className="text-sm text-gray-600">{email.from}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <div className="text-right">
-                          <p className="text-sm text-gray-600">
-                            {new Date(email.timestamp).toLocaleDateString()}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {new Date(email.timestamp).toLocaleTimeString()}
-                          </p>
-                        </div>
-                        {!email.isInitial && (
-                          <button
-                            onClick={() => toggleThread(email.id)}
-                            className="p-1 rounded hover:bg-black/5"
-                            title={collapsedThreads[email.id] ? 'Expand message' : 'Collapse message'}
-                          >
-                            {collapsedThreads[email.id] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                          </button>
+                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-zinc-100">
+                      <div className="flex items-center gap-2 font-mono">
+                        <span className="font-bold text-zinc-900">{email.fromName || email.from}</span>
+                        {email.isInternal && (
+                          <span className="px-1.5 py-0.2 rounded bg-amber-200 text-amber-900 text-[10px] font-bold">
+                            INTERNAL NOTE
+                          </span>
                         )}
                       </div>
+                      <span className="font-mono text-[10px] text-zinc-400">
+                        {new Date(email.timestamp).toLocaleString()}
+                      </span>
                     </div>
-
-                    {email.isInitial && !collapsedThreads[email.id] && (
-                      <div className="mb-3 pb-3 border-b border-gray-200">
-                        <p className="font-semibold text-gray-900">{email.subject}</p>
-                      </div>
-                    )}
-
-                    {!collapsedThreads[email.id] && (
-                      <div className="prose prose-sm max-w-none">
-                        <p className="text-gray-700 whitespace-pre-wrap">{email.content}</p>
-                      </div>
-                    )}
-
-                    {email.isInitial && (
-                      <div className="mt-3 pt-3 border-t border-gray-200">
-                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 text-xs rounded font-medium">
-                          <CheckCircle className="w-3 h-3" />
-                          Initial Request
-                        </span>
-                      </div>
-                    )}
+                    <div className="text-zinc-800 whitespace-pre-wrap leading-relaxed">
+                      {email.content}
+                    </div>
                   </div>
                 ))}
               </div>
 
-              {/* Reply Box */}
+              {/* Reply / Internal Note Input */}
               {ticket.status !== 'Closed' && (
-                <div className="bg-gray-50 rounded-xl p-6 border-2 border-gray-200 sticky bottom-0">
-                  <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                    {isInternal ? <ShieldCheck className="w-5 h-5 text-amber-600" /> : <Send className="w-5 h-5 text-[#911414]" />}
-                    {isInternal ? 'Internal note' : `Public update to ${ticket.requesterEmail}`}
-                  </h4>
+                <div className="p-4 rounded-lg border border-zinc-200 bg-zinc-50/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs font-bold text-zinc-700 uppercase">
+                      {isInternal ? 'New Internal Agent Note' : 'Public Email Response'}
+                    </span>
+                    <label className="flex items-center gap-1.5 font-mono text-xs text-zinc-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isInternal}
+                        onChange={(e) => setIsInternal(e.target.checked)}
+                        className="rounded border-zinc-300 text-[#990024] focus:ring-0"
+                      />
+                      <span>Mark as internal note</span>
+                    </label>
+                  </div>
+
                   <textarea
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value)}
-                    placeholder={isInternal ? 'Add a private note for agents...' : 'Type the update to send to the requester...'}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#911414] focus:border-transparent resize-none"
-                    rows={4}
+                    placeholder={isInternal ? 'Private note visible only to support agents...' : 'Type response to send to requester via email...'}
+                    rows={3}
+                    className="w-full p-2.5 bg-white border border-zinc-200 rounded text-xs focus:outline-none focus:border-[#990024]"
                   />
-                  <div className="flex justify-between items-center mt-3">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        className="hidden"
-                        onChange={handleAttachment}
-                      />
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg flex items-center gap-2 transition-colors"
-                      >
-                        <Paperclip className="w-4 h-4" />
-                        Attach Files
-                      </button>
-                      <label className="flex items-center gap-2 text-sm text-gray-700">
-                        <input
-                          type="checkbox"
-                          checked={isInternal}
-                          onChange={(e) => setIsInternal(e.target.checked)}
-                          className="w-4 h-4 text-[#911414] rounded focus:ring-[#911414]"
-                        />
-                        Internal note
-                      </label>
-                    </div>
+
+                  <div className="flex justify-between items-center">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      className="hidden"
+                      onChange={handleAttachment}
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-2.5 py-1 text-xs font-mono border border-zinc-200 rounded hover:bg-white text-zinc-600 flex items-center gap-1 cursor-pointer"
+                    >
+                      <Paperclip className="w-3.5 h-3.5" />
+                      <span>Attach</span>
+                    </button>
+
                     <button
                       onClick={handleSendReply}
                       disabled={!replyText.trim() || isSending}
-                      className="px-6 py-2 bg-gradient-to-r from-[#911414] to-[#d20001] text-white rounded-lg hover:from-[#ac0807] hover:to-[#911414] font-medium transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      className="px-3.5 py-1.5 bg-[#990024] hover:bg-[#80001e] text-white text-xs font-mono font-semibold rounded shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                     >
-                      <Send className="w-4 h-4" />
-                      {isSending ? 'Saving...' : isInternal ? 'Save Note' : 'Send Update'}
+                      <Send className="w-3 h-3" />
+                      <span>{isSending ? 'Sending...' : isInternal ? 'Save Note' : 'Send Update'}</span>
                     </button>
                   </div>
                 </div>
@@ -787,71 +705,50 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
           )}
 
           {activeTab === 'activity' && (
-            <div className="space-y-3">
-              {/* Activity Timeline */}
-              <div className="relative">
-                <div className="absolute left-5 top-0 bottom-0 w-0.5 bg-gray-200"></div>
-                
-                {[
-                  {
-                    action: 'Ticket Created',
-                    timestamp: ticket.createdAt,
-                    icon: <AlertCircle className="w-4 h-4" />,
-                    color: 'bg-blue-100 text-blue-600'
-                  },
-                  ...(ticket.assignedTo ? [{
-                    action: `Claimed by ${ticket.assignedTo.name}`,
-                    timestamp: ticket.updatedAt,
-                    icon: <User className="w-4 h-4" />,
-                    color: 'bg-purple-100 text-purple-600'
-                  }] : []),
-                  ...(ticket.resolvedAt ? [{
-                    action: 'Ticket Resolved',
-                    timestamp: ticket.resolvedAt,
-                    icon: <CheckCircle className="w-4 h-4" />,
-                    color: 'bg-green-100 text-green-600'
-                  }] : [])
-                ].map((activity, index) => (
-                  <div key={index} className="relative flex gap-4 pb-6">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center z-10 ${activity.color}`}>
-                      {activity.icon}
-                    </div>
-                    <div className="flex-1 pt-1">
-                      <p className="font-semibold text-gray-900">{activity.action}</p>
-                      <p className="text-sm text-gray-600">
-                        {new Date(activity.timestamp).toLocaleString()}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <div className="space-y-3 font-mono text-xs">
+              {[
+                { action: 'Ticket Created', timestamp: ticket.createdAt },
+                ...(ticket.assignedTo ? [{ action: `Claimed by ${ticket.assignedTo.name}`, timestamp: ticket.updatedAt }] : []),
+                ...(ticket.resolvedAt ? [{ action: 'Ticket Resolved', timestamp: ticket.resolvedAt }] : [])
+              ].map((activity, idx) => (
+                <div key={idx} className="p-3 rounded border border-zinc-100 bg-zinc-50/50 flex justify-between items-center">
+                  <span className="font-semibold text-zinc-800">{activity.action}</span>
+                  <span className="text-zinc-400 text-[11px] tabular-nums">{new Date(activity.timestamp).toLocaleString()}</span>
+                </div>
+              ))}
             </div>
           )}
+
         </div>
 
-        {/* Footer Actions */}
-        <div className="border-t border-gray-200 bg-gray-50 p-4 flex flex-wrap justify-between items-center gap-3">
+        {/* 4. REFINED FOOTER ACTIONS */}
+        <div className="border-t border-zinc-200 bg-zinc-50/80 p-3.5 px-6 flex items-center justify-between">
           <button
             onClick={onClose}
-            className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 font-medium transition-colors"
+            className="px-4 py-1.5 border border-zinc-200 bg-white hover:bg-zinc-100 text-zinc-700 text-xs font-mono font-semibold rounded transition-colors cursor-pointer"
           >
             Close
           </button>
-          
-          <div className="flex flex-wrap gap-2">
+
+          <div className="flex items-center gap-2">
             {statusActions.map((action) => (
               <button
                 key={action.status}
                 onClick={() => handleStatusUpdate(action.status)}
                 disabled={isUpdating}
-                className={`px-6 py-2 ${action.color} text-white rounded-lg font-medium transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2`}
+                className={`px-3.5 py-1.5 text-xs font-mono font-semibold rounded transition-all flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 ${
+                  action.isPrimary
+                    ? 'bg-[#990024] hover:bg-[#80001e] text-white'
+                    : 'bg-white hover:bg-zinc-100 border border-zinc-200 text-zinc-800'
+                }`}
               >
                 {action.icon}
-                {isUpdating ? 'Updating...' : action.label}
+                <span>{isUpdating ? 'Updating...' : action.label}</span>
               </button>
             ))}
           </div>
         </div>
+
       </div>
     </div>
   );

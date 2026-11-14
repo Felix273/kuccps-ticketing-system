@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { AlertCircle, User, Lock, Eye, EyeOff } from 'lucide-react';
-import { Logo } from '../common/Logo';
+import { AlertCircle, User, Lock, Eye, EyeOff, LogIn, ChevronDown, ChevronUp } from 'lucide-react';
 
 export const LoginPage = ({ onLogin, onBack }) => {
   const [username, setUsername] = useState('');
@@ -8,6 +7,7 @@ export const LoginPage = ({ onLogin, onBack }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showDemoCreds, setShowDemoCreds] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -16,179 +16,209 @@ export const LoginPage = ({ onLogin, onBack }) => {
 
     try {
       const result = await onLogin(username, password);
-      
       if (!result.success) {
-        setError(result.message || 'Login failed');
+        setError(result.message || 'Invalid username or password');
         setIsLoading(false);
       }
-    } catch (error) {
-      console.error('Login error:', error);
+    } catch (err) {
+      console.error('Login error:', err);
       setError('Unable to connect to server. Please try again.');
       setIsLoading(false);
     }
   };
 
+  const fillCredentials = (u, p) => {
+    setUsername(u);
+    setPassword(p);
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-orange-50 flex items-center justify-center p-4">
+    <div 
+      className="min-h-screen w-full relative flex items-center justify-center p-4 bg-cover bg-center bg-no-repeat overflow-hidden select-none font-sans"
+      style={{
+        backgroundImage: `
+          linear-gradient(135deg, rgba(133, 10, 30, 0.90) 0%, rgba(98, 8, 22, 0.94) 100%),
+          url('/office-bg.jpg')
+        `
+      }}
+    >
+      {/* Decorative Dot Matrix behind card */}
+      <div className="absolute right-[22%] top-[18%] hidden lg:grid grid-cols-6 gap-3 opacity-40 pointer-events-none">
+        {Array.from({ length: 30 }).map((_, i) => (
+          <div key={i} className="w-1.5 h-1.5 rounded-full bg-white"></div>
+        ))}
+      </div>
+
       {onBack && (
         <button
           onClick={onBack}
-          className="absolute top-4 left-4 z-50 px-4 py-2 bg-white/90 backdrop-blur-sm text-gray-700 rounded-lg hover:bg-white transition-all shadow-md flex items-center gap-2"
+          className="absolute top-5 left-5 z-50 px-3.5 py-1.5 text-xs font-semibold bg-white/90 hover:bg-white text-gray-700 rounded-md shadow transition-all flex items-center gap-1.5 cursor-pointer"
         >
           ← Back to Home
         </button>
       )}
 
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-[#d20001] rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob"></div>
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-[#911414] rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-2000"></div>
-        <div className="absolute top-40 left-40 w-80 h-80 bg-[#ac0807] rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-4000"></div>
-      </div>
-
-      <div className="relative w-full max-w-md">
-        <div className="text-center mb-8">
-          <Logo size="lg" className="mb-4" />
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-[#911414] to-[#d20001] bg-clip-text text-transparent mb-2">
-            KUCCPS IT Support
-          </h1>
-          <p className="text-gray-600">Internal Ticketing System</p>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-2xl p-8 backdrop-blur-sm bg-opacity-95">
-          <div className="mb-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Welcome Back</h2>
-            <p className="text-gray-600 text-sm">Sign in to access the IT support dashboard</p>
+      {/* Main Login Card */}
+      <div className="relative z-10 w-full max-w-[460px] bg-white rounded-2xl shadow-2xl px-8 py-9 sm:px-10 sm:py-10">
+        
+        {/* Header Dual Logo Banner */}
+        <div className="flex items-center justify-center gap-4 sm:gap-6 pb-3 border-b border-gray-100">
+          <div className="flex flex-col items-center">
+            <img 
+              src="/kenya-coat-of-arms.png" 
+              alt="Republic of Kenya" 
+              className="h-14 sm:h-16 w-auto object-contain"
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            />
+            <span className="text-[9px] font-extrabold tracking-wider text-gray-800 uppercase mt-1">
+              Republic of Kenya
+            </span>
           </div>
 
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-medium text-red-800">{error}</p>
+          <div className="h-12 w-[1px] bg-gray-300"></div>
+
+          <div className="flex items-center">
+            <img 
+              src="/kuccps-logo.png" 
+              alt="KUCCPS Logo" 
+              className="h-12 sm:h-14 w-auto object-contain"
+            />
+          </div>
+        </div>
+
+        {/* Portal Title & Subtitle */}
+        <div className="text-center mt-6 mb-7">
+          <h1 className="font-headline text-3xl sm:text-[2.1rem] font-bold text-gray-700 uppercase leading-none tracking-[0.04em]">
+            Self Service Portal
+          </h1>
+          <p className="text-xs sm:text-sm text-gray-400 font-normal mt-1">
+            Please sign-in to your account
+          </p>
+        </div>
+
+        {/* Error Alert */}
+        {error && (
+          <div className="mb-5 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+            <span className="font-medium">{error}</span>
+          </div>
+        )}
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* USERNAME */}
+          <div>
+            <label className="block text-[11px] font-bold text-gray-600 tracking-[0.18em] uppercase mb-1.5">
+              Username
+            </label>
+            <div className="relative flex items-center">
+              <User className="absolute left-3.5 w-4 h-4 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="e.g. USER.NAME or KUCCPS\USER.NAME"
+                required
+                disabled={isLoading}
+                className="w-full pl-10 pr-3.5 py-2.5 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-[#990024] focus:ring-1 focus:ring-[#990024] transition-all"
+              />
+            </div>
+          </div>
+
+          {/* PASSWORD */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-[11px] font-bold text-gray-600 tracking-[0.18em] uppercase">
+                Password
+              </label>
+              <button
+                type="button"
+                onClick={() => alert('Please contact the ICT Helpdesk to reset your domain password.')}
+                className="text-[11px] font-semibold text-[#990024] hover:text-[#7d001d] transition-colors cursor-pointer"
+              >
+                Forgot password?
+              </button>
+            </div>
+            <div className="relative flex items-center">
+              <Lock className="absolute left-3.5 w-4 h-4 text-gray-400 pointer-events-none" />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••••••"
+                required
+                disabled={isLoading}
+                className="w-full pl-10 pr-10 py-2.5 text-xs sm:text-sm bg-white border border-gray-200 rounded-lg text-gray-800 placeholder-gray-400 focus:outline-none focus:border-[#990024] focus:ring-1 focus:ring-[#990024] transition-all"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 text-gray-400 hover:text-gray-600 focus:outline-none transition-colors"
+                disabled={isLoading}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          {/* SIGN IN BUTTON */}
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full mt-2 py-3 px-4 bg-[#990024] hover:bg-[#80001e] active:bg-[#6c0019] text-white text-sm font-semibold rounded-lg flex items-center justify-center gap-2 shadow-sm transition-all duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isLoading ? (
+              <span className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                Signing in...
+              </span>
+            ) : (
+              <>
+                <LogIn className="w-4 h-4" />
+                Sign In
+              </>
+            )}
+          </button>
+        </form>
+
+        {/* Card Footer Copyright */}
+        <div className="mt-7 pt-4 text-center">
+          <p className="text-xs text-gray-400 font-normal">
+            &copy; {new Date().getFullYear()} KUCCPS
+          </p>
+        </div>
+
+        {/* Collapsible Local Demo Credentials */}
+        <div className="mt-4 pt-3 border-t border-dashed border-gray-200">
+          <button
+            type="button"
+            onClick={() => setShowDemoCreds(!showDemoCreds)}
+            className="w-full flex items-center justify-between text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <span>Developer Test Accounts</span>
+            {showDemoCreds ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+
+          {showDemoCreds && (
+            <div className="mt-2.5 p-2.5 bg-gray-50 rounded-lg text-[11px] space-y-1.5 text-gray-600">
+              <div 
+                onClick={() => fillCredentials('admin', 'admin123')}
+                className="flex justify-between items-center p-1 rounded hover:bg-gray-100 cursor-pointer transition-colors"
+              >
+                <span>Admin: <strong className="text-gray-800">admin</strong></span>
+                <span className="text-[10px] text-[#990024] font-semibold">Click to fill</span>
+              </div>
+              <div 
+                onClick={() => fillCredentials('itstaff', 'staff123')}
+                className="flex justify-between items-center p-1 rounded hover:bg-gray-100 cursor-pointer transition-colors"
+              >
+                <span>Staff: <strong className="text-gray-800">itstaff</strong></span>
+                <span className="text-[10px] text-[#990024] font-semibold">Click to fill</span>
               </div>
             </div>
           )}
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Username
-              </label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#911414] focus:border-transparent transition-all"
-                  placeholder="Enter your username"
-                  required
-                  disabled={isLoading}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Password
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-11 pr-12 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#911414] focus:border-transparent transition-all"
-                  placeholder="Enter your password"
-                  required
-                  disabled={isLoading}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                  disabled={isLoading}
-                >
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <label className="flex items-center">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 text-[#911414] border-gray-300 rounded focus:ring-[#911414]"
-                  disabled={isLoading}
-                />
-                <span className="ml-2 text-sm text-gray-600">Remember me</span>
-              </label>
-              <a href="#" className="text-sm font-medium text-[#911414] hover:text-[#d20001]">
-                Forgot password?
-              </a>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full py-3 px-4 bg-gradient-to-r from-[#911414] to-[#d20001] text-white font-semibold rounded-lg hover:from-[#ac0807] hover:to-[#911414] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#911414] transition-all transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-            >
-              {isLoading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Signing in...
-                </span>
-              ) : (
-                'Sign In'
-              )}
-            </button>
-          </form>
-
-          <div className="mt-6 pt-6 border-t border-gray-200">
-            <p className="text-xs text-center text-gray-500">
-              This system uses LDAP/Active Directory authentication
-            </p>
-          </div>
-
-          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-xs font-semibold text-[#911414] mb-1">Demo Credentials:</p>
-            <p className="text-xs text-[#911414]">
-              Username: <code className="bg-red-100 px-1 rounded">admin</code> / 
-              Password: <code className="bg-red-100 px-1 rounded">admin123</code>
-            </p>
-            <p className="text-xs text-[#911414]">
-              Username: <code className="bg-red-100 px-1 rounded">itstaff</code> / 
-              Password: <code className="bg-red-100 px-1 rounded">staff123</code>
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-6 text-center">
-          <p className="text-sm text-gray-600">
-            Need help? Contact IT Support at{' '}
-            <a href="mailto:itsupport@kuccps.ac.ke" className="text-[#911414] hover:text-[#d20001] font-medium">
-              itsupport@kuccps.ac.ke
-            </a>
-          </p>
         </div>
       </div>
-
-      <style>{`
-        @keyframes blob {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(30px, -50px) scale(1.1); }
-          66% { transform: translate(-20px, 20px) scale(0.9); }
-        }
-        .animate-blob {
-          animation: blob 7s infinite;
-        }
-        .animation-delay-2000 {
-          animation-delay: 2s;
-        }
-        .animation-delay-4000 {
-          animation-delay: 4s;
-        }
-      `}</style>
     </div>
   );
 };

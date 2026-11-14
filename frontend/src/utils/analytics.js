@@ -1,5 +1,5 @@
 // src/utils/analytics.js
-import { DEPARTMENTS, ISSUE_CATEGORIES, TICKET_STATUS, PRIORITY_LEVELS } from './constants';
+import { DEPARTMENTS, ISSUE_CATEGORIES, TICKET_STATUS, PRIORITY_LEVELS, normalizePriority } from './constants';
 
 export const calculateAnalytics = (tickets) => {
   const departmentStats = DEPARTMENTS.map(dept => ({
@@ -19,7 +19,7 @@ export const calculateAnalytics = (tickets) => {
 
   const priorityStats = PRIORITY_LEVELS.map(priority => ({
     name: priority,
-    count: tickets.filter(t => t.priority === priority).length
+    count: tickets.filter(t => normalizePriority(t.priority) === priority).length
   }));
 
   const trendData = [];
@@ -59,6 +59,6 @@ export const calculateAnalytics = (tickets) => {
     openTickets: tickets.filter(t => t.status === 'Open').length,
     inProgressTickets: tickets.filter(t => t.status === 'In Progress').length,
     resolvedTickets: tickets.filter(t => t.status === 'Resolved').length,
-    criticalTickets: tickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved').length
+    criticalTickets: tickets.filter(t => normalizePriority(t.priority) === 'Very High' && t.status !== 'Resolved' && t.status !== 'Closed').length
   };
 };

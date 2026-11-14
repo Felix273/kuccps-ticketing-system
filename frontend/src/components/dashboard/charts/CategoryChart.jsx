@@ -4,7 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 export const CategoryChart = ({ data }) => (
   <div className="bg-white rounded-xl shadow-lg p-6">
     <h3 className="text-lg font-semibold text-gray-900 mb-6">Top Issue Categories</h3>
-    <ResponsiveContainer width="100%" height={280}>
+    <ResponsiveContainer width="100%" height={280} initialDimension={{ width: 400, height: 280 }}>
       <BarChart data={data} layout="vertical">
         <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
         <XAxis type="number" stroke="#6b7280" style={{ fontSize: '12px' }} />

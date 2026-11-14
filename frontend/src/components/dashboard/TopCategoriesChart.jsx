@@ -1,107 +1,79 @@
 import React from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from 'recharts';
 import { TrendingUp } from 'lucide-react';
 
-const COLORS = ['#dc2626', '#ea580c', '#ca8a04', '#16a34a', '#0284c7', '#7c3aed', '#db2777', '#64748b'];
+const COLORS = ['#e11d48', '#f97316', '#d99000', '#16a34a', '#0284c7', '#7c3aed', '#db2777', '#64748b'];
 
-export const TopCategoriesChart = ({ data = [], statistics }) => {
-  const sourceData = data.length > 0 ? data : statistics?.topCategories || [];
+const CategoryTooltip = ({ active, payload }) => {
+  if (!active || !payload?.length) return null;
 
-  if (sourceData.length === 0) {
-    return null;
-  }
-
-  const total = sourceData.reduce((sum, item) => sum + item.count, 0);
-  const topCategories = [...sourceData]
-    .sort((a, b) => b.count - a.count)
-    .map(item => ({
-      ...item,
-      percentage: item.percentage ?? (total > 0 ? Math.round((item.count / total) * 100) : 0)
-    }));
+  const { name, count, percentage, fill } = payload[0].payload;
 
   return (
-    <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-gray-200">
-      <h3 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
-        <TrendingUp className="w-6 h-6 text-[#911414]" />
-        Category Issues
-      </h3>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Bar Chart */}
-        <div className="pb-4">
-          <h4 className="text-sm font-semibold text-gray-600 mb-4">By Volume</h4>
-          <ResponsiveContainer width="100%" height={450}>
-            <BarChart data={topCategories} margin={{ top: 5, right: 30, left: 20, bottom: 80 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis 
-                dataKey="name" 
-                angle={-45}
-                textAnchor="end"
-                height={100}
-                tick={{ fontSize: 11 }}
-                interval={0}
-              />
-              <YAxis />
-              <Tooltip 
-                contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '2px solid #911414',
-                  borderRadius: '8px',
-                  padding: '8px'
-                }}
-                formatter={(value, name, props) => [
-                  `${value} tickets (${props.payload.percentage}%)`,
-                  'Count'
-                ]}
-              />
-              <Bar dataKey="count" radius={[8, 8, 0, 0]}>
-                {topCategories.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Pie Chart */}
-        <div className="pb-4">
-          <h4 className="text-sm font-semibold text-gray-600 mb-4">By Percentage</h4>
-          <ResponsiveContainer width="100%" height={450}>
-            <PieChart margin={{ top: 0, right: 0, bottom: 40, left: 0 }}>
-              <Pie
-                data={topCategories}
-                cx="50%"
-                cy="45%"
-                labelLine={false}
-                label={({ percentage }) => percentage > 5 ? `${percentage}%` : ''}
-                outerRadius={110}
-                fill="#8884d8"
-                dataKey="count"
-              >
-                {topCategories.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip 
-                formatter={(value, name, props) => [
-                  `${value} tickets (${props.payload.percentage}%)`,
-                  props.payload.name
-                ]}
-              />
-              <Legend 
-                verticalAlign="bottom"
-                height={80}
-                wrapperStyle={{ paddingTop: '20px' }}
-                formatter={(value, entry) => {
-                  const name = entry.payload.name;
-                  const shortName = name.length > 20 ? name.substring(0, 18) + '...' : name;
-                  return `${shortName}: ${entry.payload.count}`;
-                }}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+    <div className="rounded-lg border border-[#990024] bg-white px-3 py-2.5 text-sm text-slate-900 shadow-lg">
+      <p className="font-semibold">{name}</p>
+      <p className="mt-1 text-slate-600">
+        Count: <span className="font-semibold text-slate-900">{count}</span> tickets ({percentage}%)
+      </p>
+      <span className="mt-2 block h-1 rounded-full" style={{ backgroundColor: fill }} />
     </div>
   );
 };
+
+export const TopCategoriesChart = ({ data = [] }) => (
+  <section className="border border-zinc-200 bg-white">
+    <div className="flex flex-col gap-1 border-b border-zinc-200 px-4 py-3 sm:px-5">
+      <div className="flex items-center gap-2">
+        <TrendingUp className="h-4 w-4 text-[#990024]" />
+        <h2 className="text-base font-bold tracking-tight text-zinc-900">Category Issues</h2>
+      </div>
+      <p className="text-xs text-zinc-500">By Volume</p>
+    </div>
+
+    {data.length ? (
+      <div className="h-[21rem] w-full p-3 sm:p-5">
+        <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 400, height: 296 }}>
+          <BarChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 82 }}>
+            <CartesianGrid stroke="#e4e4e7" strokeDasharray="3 3" vertical={true} />
+            <XAxis
+              dataKey="name"
+              angle={-45}
+              textAnchor="end"
+              height={100}
+              interval={0}
+              tick={{ fill: '#71717a', fontSize: 10 }}
+              axisLine={{ stroke: '#a1a1aa' }}
+              tickLine={{ stroke: '#a1a1aa' }}
+            />
+            <YAxis
+              allowDecimals={false}
+              width={32}
+              tick={{ fill: '#71717a', fontSize: 11 }}
+              axisLine={{ stroke: '#a1a1aa' }}
+              tickLine={{ stroke: '#a1a1aa' }}
+            />
+            <Tooltip content={<CategoryTooltip />} cursor={{ fill: '#f4f4f5' }} />
+            <Bar dataKey="count" radius={[7, 7, 0, 0]} maxBarSize={76}>
+              {data.map((item, index) => (
+                <Cell key={item.name} fill={COLORS[index % COLORS.length]} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    ) : (
+      <div className="flex h-48 items-center justify-center px-4 text-sm text-zinc-500">
+        No category ticket data available yet.
+      </div>
+    )}
+  </section>
+);

@@ -3,6 +3,8 @@ const { simpleParser } = require('mailparser');
 const Imap = require('imap');
 const cron = require('node-cron');
 const { PrismaClient } = require('@prisma/client');
+const { getConfiguredTicketSlaDeadlines, getTicketSlaChecks } = require('./slaService');
+const { createCsatLinks, renderCsatLinks } = require('./csatService');
 
 const prisma = new PrismaClient();
 
@@ -181,7 +183,10 @@ async function sendEmail(to, templateType, data) {
       '[NOREPLY_EMAIL]': settings.noreplyEmail || settings.supportEmail || 'noreply@kuccps.ac.ke',
       '{{noreplyEmail}}': settings.noreplyEmail || settings.supportEmail || 'noreply@kuccps.ac.ke',
       '{{primaryColor}}': settings.primaryColor || '#911414',
-      '{{secondaryColor}}': settings.secondaryColor || '#d20001'
+      '{{secondaryColor}}': settings.secondaryColor || '#d20001',
+      '{{csatLinks}}': templateType === 'ticketResolved' && data.id && data.requesterEmail
+        ? renderCsatLinks(data, settings.primaryColor || '#911414')
+        : ''
     };
 
     html = html
@@ -196,6 +201,10 @@ async function sendEmail(to, templateType, data) {
     for (const [placeholder, value] of Object.entries(replacements)) {
       subject = replaceAllLiteral(subject, placeholder, value);
       html = replaceAllLiteral(html, placeholder, value);
+    }
+
+    if (templateType === 'ticketResolved' && data.id && data.requesterEmail) {
+      html = ensureWorkingCsatLinks(html, data, settings.primaryColor || '#911414');
     }
 
     const ticketTemplateTypes = new Set(['ticketCreated', 'ticketUpdated', 'ticketResolved']);
@@ -237,6 +246,38 @@ async function sendTicketReply(ticket, comment) {
     comment,
     emailMessageId: ticket.emailMessageId
   });
+}
+
+function ensureWorkingCsatLinks(html, ticket, primaryColor) {
+  const links = new Map(createCsatLinks(ticket).map(link => [link.rating, link.url]));
+  const linkedRatings = new Set();
+  const rewrittenHtml = html.replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (anchor, attributes, contents) => {
+    const text = contents.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ');
+    const ratingMatch = text.match(/\b([1-5])\s+Stars?\b/i);
+    if (!ratingMatch) return anchor;
+
+    const rating = Number(ratingMatch[1]);
+    linkedRatings.add(rating);
+    const safeAttributes = attributes.replace(/\s+href\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/i, '');
+    return `<a${safeAttributes} href="${links.get(rating)}">${contents}</a>`;
+  });
+
+  if ([1, 2, 3, 4, 5].every(rating => linkedRatings.has(rating))) {
+    return rewrittenHtml;
+  }
+
+  const generatedLinks = renderCsatLinks(ticket, primaryColor);
+  if (rewrittenHtml.includes('{{csatLinks}}')) {
+    return rewrittenHtml.replace('{{csatLinks}}', generatedLinks);
+  }
+
+  const footerStart = rewrittenHtml.search(/<div\b[^>]*>\s*<p\b[^>]*>\s*©/i);
+  if (footerStart >= 0) {
+    return `${rewrittenHtml.slice(0, footerStart)}${generatedLinks}${rewrittenHtml.slice(footerStart)}`;
+  }
+  const lastClosingDiv = rewrittenHtml.lastIndexOf('</div>');
+  if (lastClosingDiv < 0) return `${rewrittenHtml}${generatedLinks}`;
+  return `${rewrittenHtml.slice(0, lastClosingDiv)}${generatedLinks}${rewrittenHtml.slice(lastClosingDiv)}`;
 }
 
 // Generate ticket number in format from settings
@@ -301,9 +342,23 @@ async function processIncomingEmail(emailData) {
       try {
         const commentAuthor = await prisma.user.findUnique({
           where: { email: from },
-          select: { id: true }
+          select: { id: true, role: true }
         });
         userId = commentAuthor?.id || null;
+        if (ticket && ['staff', 'admin'].includes(commentAuthor?.role) && !ticket.firstRespondedAt) {
+          const respondedAt = new Date();
+          await prisma.ticket.update({
+            where: { id: ticket.id },
+            data: {
+              firstRespondedAt: respondedAt,
+              slaBreached: ticket.slaBreached || getTicketSlaChecks({
+                ...ticket,
+                firstRespondedAt: respondedAt
+              }, respondedAt).some(check => !check),
+              responseTime: Math.floor((respondedAt - new Date(ticket.createdAt)) / 60000)
+            }
+          });
+        }
       } catch (userErr) {
         console.log('Could not resolve comment author:', userErr.message);
       }
@@ -330,6 +385,10 @@ async function processIncomingEmail(emailData) {
 
     // Create new ticket with same format used by the main app
     const newTicketNumber = await generateTicketNumber();
+    const createdAt = new Date();
+    const category = settings.defaultCategory || 'General Issues';
+    const priority = settings.defaultPriority || 'Medium';
+    const slaDeadlines = await getConfiguredTicketSlaDeadlines(prisma, category, priority, createdAt);
 
     const newTicket = await prisma.ticket.create({
       data: {
@@ -338,9 +397,16 @@ async function processIncomingEmail(emailData) {
         description: body,
         requesterEmail: from,
         status: settings.defaultStatus || 'Open',
-        priority: settings.defaultPriority || 'Medium',
-        category: settings.defaultCategory || 'General Issues',
-        emailMessageId: parsed.messageId || null
+        priority,
+        category,
+        emailMessageId: parsed.messageId || null,
+        createdAt,
+        responseDueAt: slaDeadlines.responseDueAt,
+        slaDueAt: slaDeadlines.slaDueAt,
+        slaEscalationAt: slaDeadlines.slaEscalationAt,
+        slaResponseTargetPercent: slaDeadlines.slaResponseTargetPercent,
+        slaResolutionTargetPercent: slaDeadlines.slaResolutionTargetPercent,
+        slaBreached: false
       }
     });
 

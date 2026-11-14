@@ -477,6 +477,8 @@ exports.resetEmailTemplatesToDefault = async (req, res) => {
                 If you're satisfied with the resolution, no further action is needed. Please do not reply to this automated email. Contact ICT directly at {{supportEmail}} if you need additional assistance.
               </p>
 
+              {{csatLinks}}
+
               <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
                 Thank you for using {{emailFromName}}!
               </p>

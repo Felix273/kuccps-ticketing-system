@@ -8,28 +8,29 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(uuid())
-  email         String   @unique
-  name          String
-  username      String   @unique
-  password      String
-  departmentId  String?
-  department    Department? @relation(fields: [departmentId], references: [id])
-  role          String   @default("staff")
-  ldapSync      Boolean  @default(false)
-  ldapDn        String?
+  id             String      @id @default(uuid())
+  email          String      @unique
+  name           String
+  username       String      @unique
+  password       String
+  departmentId   String?
+  department     Department? @relation(fields: [departmentId], references: [id])
+  role           String      @default("staff")
+  ldapSync       Boolean     @default(false)
+  ldapDn         String?
   ldapObjectGuid String?
-  lastSyncedAt  DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  lastSyncedAt   DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
-  assignedTickets Ticket[] @relation("AssignedTickets")
-  createdTickets  Ticket[] @relation("CreatedTickets")
-  comments        Comment[]
-  savedViews      SavedView[]
-  csatResponses   CsatResponse[]
+  assignedTickets        Ticket[]                @relation("AssignedTickets")
+  createdTickets         Ticket[]                @relation("CreatedTickets")
+  comments               Comment[]
+  savedViews             SavedView[]
+  csatResponses          CsatResponse[]
   notificationPreference NotificationPreference?
-  roleAssignments UserRole[]
+  notifications          Notification[]
+  roleAssignments        UserRole[]
 
   @@index([email])
   @@index([username])
@@ -42,48 +43,54 @@ model Department {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tickets   Ticket[]
-  users     User[]
+  tickets     Ticket[]
+  users       User[]
   slaPolicies SlaPolicy[]
 }
 
 model Ticket {
-  id                String   @id @default(uuid())
-  ticketNumber      String   @unique
-  subject           String
-  description       String   @db.Text
-  emailContent      String?  @db.Text
-  category          String
-  priority          String   @default("Medium")
-  status            String   @default("Open")
+  id           String  @id @default(uuid())
+  ticketNumber String  @unique
+  subject      String
+  description  String  @db.Text
+  emailContent String? @db.Text
+  category     String
+  priority     String  @default("Medium")
+  status       String  @default("Open")
 
-  requesterEmail    String
-  requesterName     String?
-  departmentId      String?
-  department        Department? @relation(fields: [departmentId], references: [id])
+  requesterEmail String
+  requesterName  String?
+  departmentId   String?
+  department     Department? @relation(fields: [departmentId], references: [id])
 
-  assignedToId      String?
-  assignedTo        User?    @relation("AssignedTickets", fields: [assignedToId], references: [id])
+  assignedToId String?
+  assignedTo   User?   @relation("AssignedTickets", fields: [assignedToId], references: [id])
 
-  createdById       String?
-  createdBy         User?    @relation("CreatedTickets", fields: [createdById], references: [id])
+  createdById String?
+  createdBy   User?   @relation("CreatedTickets", fields: [createdById], references: [id])
 
-  emailMessageId    String?  @unique
+  emailMessageId String? @unique
 
-  responseTime      Int?
-  resolutionTime    Int?
-  slaDueAt          DateTime?
-  slaBreached       Boolean  @default(false)
+  responseTime               Int?
+  resolutionTime             Int?
+  firstRespondedAt           DateTime?
+  responseDueAt              DateTime?
+  slaDueAt                   DateTime?
+  slaEscalationAt            DateTime?
+  slaResponseTargetPercent   Int?
+  slaResolutionTargetPercent Int?
+  slaBreached                Boolean   @default(false)
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  resolvedAt        DateTime?
-  closedAt          DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  resolvedAt DateTime?
+  closedAt   DateTime?
 
-  attachments       Attachment[]
-  comments          Comment[]
-  history           TicketHistory[]
-  csatResponses     CsatResponse[]
+  attachments   Attachment[]
+  comments      Comment[]
+  history       TicketHistory[]
+  csatResponses CsatResponse[]
+  notifications Notification[]
 
   @@index([ticketNumber])
   @@index([status])
@@ -93,132 +100,132 @@ model Ticket {
 }
 
 model Attachment {
-  id          String   @id @default(uuid())
-  ticketId    String
-  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  id       String @id @default(uuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
-  filename    String
-  filepath    String
-  mimetype    String
-  size        Int
+  filename String
+  filepath String
+  mimetype String
+  size     Int
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([ticketId])
 }
 
 model Comment {
-  id          String   @id @default(uuid())
-  ticketId    String
-  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  id       String @id @default(uuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
-  userId      String?
-  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  content     String   @db.Text
-  isInternal  Boolean  @default(false)
+  content    String  @db.Text
+  isInternal Boolean @default(false)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([ticketId])
   @@index([userId])
 }
 
 model TicketHistory {
-  id          String   @id @default(uuid())
-  ticketId    String
-  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  id       String @id @default(uuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
-  field       String
-  oldValue    String?
-  newValue    String?
-  changedBy   String?
+  field     String
+  oldValue  String?
+  newValue  String?
+  changedBy String?
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([ticketId])
 }
 
 model EmailConfig {
-  id                String   @id @default(uuid())
-  provider          String   @default("gmail")
-  email             String   @unique
-  isActive          Boolean  @default(true)
-  lastChecked       DateTime?
+  id          String    @id @default(uuid())
+  provider    String    @default("gmail")
+  email       String    @unique
+  isActive    Boolean   @default(true)
+  lastChecked DateTime?
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model SystemSettings {
-  id                    String   @id @default(uuid())
+  id String @id @default(uuid())
 
-  organizationName      String   @default("KUCCPS IT Support")
-  organizationCode      String   @default("KUCCPS")
-  logoUrl               String?
-  faviconUrl            String?
+  organizationName String  @default("KUCCPS IT Support")
+  organizationCode String  @default("KUCCPS")
+  logoUrl          String?
+  faviconUrl       String?
 
-  primaryColor          String   @default("#911414")
-  secondaryColor       String   @default("#d20001")
+  primaryColor   String @default("#911414")
+  secondaryColor String @default("#d20001")
 
-  supportEmail          String   @default("itsupport@kuccps.ac.ke")
-  noreplyEmail          String   @default("noreply@kuccps.ac.ke")
-  emailFromName         String   @default("KUCCPS IT Support")
+  supportEmail  String @default("itsupport@kuccps.ac.ke")
+  noreplyEmail  String @default("noreply@kuccps.ac.ke")
+  emailFromName String @default("KUCCPS IT Support")
 
-  smtpHost              String   @default("smtp.gmail.com")
-  smtpPort              Int      @default(587)
-  smtpSecure            Boolean  @default(false)
-  smtpUser              String?
-  smtpPassword          String?
+  smtpHost     String  @default("smtp.gmail.com")
+  smtpPort     Int     @default(587)
+  smtpSecure   Boolean @default(false)
+  smtpUser     String?
+  smtpPassword String?
 
-  imapHost              String   @default("imap.gmail.com")
-  imapPort              Int      @default(993)
-  imapUser              String?
-  imapPassword          String?
-  imapEnabled           Boolean  @default(false)
-  imapPollInterval      Int      @default(5)
+  imapHost         String  @default("imap.gmail.com")
+  imapPort         Int     @default(993)
+  imapUser         String?
+  imapPassword     String?
+  imapEnabled      Boolean @default(false)
+  imapPollInterval Int     @default(5)
 
-  ldapEnabled           Boolean  @default(false)
-  ldapUrl               String?
-  ldapBaseDn            String?
-  ldapUserDnPrefix      String?
-  ldapBindDn            String?
-  ldapBindPassword      String?
-  ldapDomain            String?
-  ldapUserSearchBase    String?
-  ldapUserFilter        String?  @default("(&(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))")
+  ldapEnabled               Boolean @default(false)
+  ldapUrl                   String?
+  ldapBaseDn                String?
+  ldapUserDnPrefix          String?
+  ldapBindDn                String?
+  ldapBindPassword          String?
+  ldapDomain                String?
+  ldapUserSearchBase        String?
+  ldapUserFilter            String? @default("(&(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))")
   ldapDirectorateSearchBase String?
-  ldapDirectorateFilter String?  @default("(|(objectClass=organizationalUnit)(objectClass=group))")
-  ldapUsernameAttribute String   @default("sAMAccountName")
-  ldapEmailAttribute    String   @default("mail")
-  ldapNameAttribute     String   @default("displayName")
-  ldapDepartmentAttribute String @default("department")
-  ldapIctGroupDn        String?
-  ldapIctUserFilter     String?
-  ldapDefaultRole       String   @default("user")
-  ldapSyncUsersEnabled  Boolean  @default(true)
+  ldapDirectorateFilter     String? @default("(|(objectClass=organizationalUnit)(objectClass=group))")
+  ldapUsernameAttribute     String  @default("sAMAccountName")
+  ldapEmailAttribute        String  @default("mail")
+  ldapNameAttribute         String  @default("displayName")
+  ldapDepartmentAttribute   String  @default("department")
+  ldapIctGroupDn            String?
+  ldapIctUserFilter         String?
+  ldapDefaultRole           String  @default("user")
+  ldapSyncUsersEnabled      Boolean @default(true)
 
-  ticketNumberPrefix    String   @default("TICK")
-  ticketNumberFormat   String   @default("YYYYMMDD-XXXX")
+  ticketNumberPrefix String @default("TICK")
+  ticketNumberFormat String @default("YYYYMMDD-XXXX")
 
-  defaultPriority      String   @default("Medium")
-  defaultCategory      String   @default("General Issues")
-  defaultStatus        String   @default("Open")
+  defaultPriority String @default("Medium")
+  defaultCategory String @default("General Issues")
+  defaultStatus   String @default("Open")
 
-  googleAddonApiUrl    String?
-  googleAddonEnabled   Boolean  @default(false)
+  googleAddonApiUrl  String?
+  googleAddonEnabled Boolean @default(false)
 
-  maxFileSize          Int      @default(10485760)
-  allowedFileTypes     String   @default("jpg,jpeg,png,gif,pdf,doc,docx,xls,xlsx,zip")
+  maxFileSize      Int    @default(10485760)
+  allowedFileTypes String @default("jpg,jpeg,png,gif,pdf,doc,docx,xls,xlsx,zip")
 
-  maintenanceMode      Boolean  @default(false)
-  maintenanceMessage   String?
-  darkModeEnabled      Boolean  @default(false)
-  contrastMode         String   @default("normal")
+  maintenanceMode    Boolean @default(false)
+  maintenanceMessage String?
+  darkModeEnabled    Boolean @default(false)
+  contrastMode       String  @default("normal")
 
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model EmailTemplate {
@@ -231,58 +238,37 @@ model EmailTemplate {
 }
 
 model SavedView {
-  id          String   @id @default(uuid())
-  name        String
-  entity      String   @default("tickets")
-  filters     Json
-  columns     Json?
-  sortBy      String?
-  sortOrder   String   @default("desc")
-  visibility  String   @default("private")
-  role        String?
-  ownerId     String?
-  owner       User?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  name       String
+  entity     String   @default("tickets")
+  filters    Json
+  columns    Json?
+  sortBy     String?
+  sortOrder  String   @default("desc")
+  visibility String   @default("private")
+  role       String?
+  ownerId    String?
+  owner      User?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@index([entity])
   @@index([visibility])
   @@index([ownerId])
 }
 
-model KnowledgeArticle {
-  id          String   @id @default(uuid())
-  title       String
-  slug        String   @unique
-  excerpt     String?
-  content     String   @db.Text
-  category    String
-  tags        String   @default("")
-  status      String   @default("draft")
-  views       Int      @default(0)
-  helpful     Int      @default(0)
-  notHelpful  Int      @default(0)
-  createdBy   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([category])
-  @@index([status])
-  @@index([slug])
-}
-
 model StatusIssue {
-  id          String   @id @default(uuid())
+  id          String              @id @default(uuid())
   title       String
-  description String   @db.Text
-  status      String   @default("Investigating")
-  severity    String   @default("Informational")
-  systems     String   @default("")
-  isPublic    Boolean  @default(true)
-  startedAt   DateTime @default(now())
+  description String              @db.Text
+  status      String              @default("Investigating")
+  severity    String              @default("Informational")
+  systems     String              @default("")
+  isPublic    Boolean             @default(true)
+  startedAt   DateTime            @default(now())
   resolvedAt  DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
   updates     StatusIssueUpdate[]
 
   @@index([status])
@@ -305,54 +291,86 @@ model StatusIssueUpdate {
 }
 
 model CustomForm {
-  id          String   @id @default(uuid())
+  id          String            @id @default(uuid())
   name        String
   category    String?
   description String?
-  isActive    Boolean  @default(true)
+  isActive    Boolean           @default(true)
   fields      CustomFormField[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 
   @@index([category])
   @@index([isActive])
 }
 
 model CustomFormField {
-  id          String     @id @default(uuid())
-  formId      String
-  form        CustomForm @relation(fields: [formId], references: [id], onDelete: Cascade)
-  label       String
-  key         String
-  type        String     @default("text")
-  required    Boolean    @default(false)
-  options     Json?
-  conditions  Json?
-  sortOrder   Int        @default(0)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  id         String     @id @default(uuid())
+  formId     String
+  form       CustomForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  label      String
+  key        String
+  type       String     @default("text")
+  required   Boolean    @default(false)
+  options    Json?
+  conditions Json?
+  sortOrder  Int        @default(0)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
 
   @@index([formId])
   @@index([key])
 }
 
 model SlaPolicy {
-  id                String      @id @default(uuid())
-  name              String
-  priority          String?
-  category          String?
-  departmentId      String?
-  department        Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  responseMinutes   Int         @default(240)
-  resolutionMinutes Int         @default(1440)
-  isActive          Boolean     @default(true)
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+  id                             String      @id @default(uuid())
+  policyKey                      String      @unique @default(cuid())
+  name                           String
+  priority                       String?
+  category                       String?
+  departmentId                   String?
+  department                     Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  responseMinutes                Int         @default(240)
+  resolutionMinutes              Int         @default(1440)
+  responseValue                  Float?
+  responseUnit                   String?
+  responseTargetPercent          Int?
+  resolutionValue                Float?
+  resolutionUnit                 String?
+  resolutionTargetPercent        Int?
+  escalationGraceHours           Int?
+  defaultResponseValue           Float?
+  defaultResponseUnit            String?
+  defaultResponseTargetPercent   Int?
+  defaultResolutionValue         Float?
+  defaultResolutionUnit          String?
+  defaultResolutionTargetPercent Int?
+  defaultEscalationGraceHours    Int?
+  isSlaDefault                   Boolean     @default(false)
+  isActive                       Boolean     @default(true)
+  createdAt                      DateTime    @default(now())
+  updatedAt                      DateTime    @updatedAt
+
+  audits SlaPolicyAudit[]
 
   @@index([priority])
   @@index([category])
   @@index([departmentId])
   @@index([isActive])
+  @@index([isSlaDefault])
+}
+
+model SlaPolicyAudit {
+  id            String    @id @default(uuid())
+  policyKey     String
+  policy        SlaPolicy @relation(fields: [policyKey], references: [policyKey], onDelete: Cascade)
+  changedById   String?
+  changedByName String
+  action        String
+  changes       Json
+  createdAt     DateTime  @default(now())
+
+  @@index([policyKey, createdAt])
 }
 
 model CsatResponse {
@@ -382,6 +400,24 @@ model NotificationPreference {
   updatedAt           DateTime @updatedAt
 
   @@index([userId])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticketId  String?
+  ticket    Ticket?  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  message   String   @db.Text
+  isRead    Boolean  @default(false)
+  dedupeKey String?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, isRead, createdAt])
+  @@index([ticketId])
 }
 
 model AccessRole {
@@ -442,4 +478,92 @@ model AccessControlAuditLog {
   @@index([actorId, createdAt])
   @@index([targetUserId, createdAt])
   @@index([roleId, createdAt])
+}
+
+model KnowledgeArticle {
+  id       String  @id @default(uuid())
+  title    String
+  slug     String  @unique
+  excerpt  String?
+  content  String  @db.Text
+  category String
+  tags     String  @default("")
+  status   String  @default("published") // draft, pending_review, published, archived
+
+  // Structured ICT Troubleshooting Fields
+  symptoms        String? @db.Text
+  affectedDevices String? // e.g. "Kyocera TASKalfa 4054ci / 5054ci, ECOSYS M3645idn"
+  cause           String? @db.Text
+  resolution      String? @db.Text
+  escalation      String? @db.Text
+  relatedArticles String? @db.Text // Comma-separated slugs or IDs
+  attachments     Json? // Array of { name, url, size, mimeType }
+
+  // Author & Review Metadata
+  authorId   String?
+  authorName String?
+  authorRole String?   @default("staff")
+  approvedBy String?
+  approvedAt DateTime?
+
+  // Governance & Versioning
+  version    Int       @default(1)
+  isArchived Boolean   @default(false)
+  deletedAt  DateTime?
+
+  // Telemetry & Feedback
+  views      Int @default(0)
+  helpful    Int @default(0)
+  notHelpful Int @default(0)
+
+  revisions KnowledgeRevision[]
+  feedbacks KnowledgeFeedback[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+  @@index([status])
+  @@index([isArchived])
+}
+
+model KnowledgeRevision {
+  id         String           @id @default(uuid())
+  articleId  String
+  article    KnowledgeArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  version    Int
+  title      String
+  content    String           @db.Text
+  symptoms   String?          @db.Text
+  resolution String?          @db.Text
+  changedBy  String?
+  reason     String?
+  createdAt  DateTime         @default(now())
+
+  @@index([articleId])
+}
+
+model KnowledgeSearchLog {
+  id          String   @id @default(uuid())
+  query       String
+  category    String?
+  resultCount Int
+  userId      String?
+  userRole    String?
+  createdAt   DateTime @default(now())
+
+  @@index([query])
+  @@index([resultCount])
+}
+
+model KnowledgeFeedback {
+  id         String           @id @default(uuid())
+  articleId  String
+  article    KnowledgeArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  wasHelpful Boolean
+  comment    String?
+  userId     String?
+  createdAt  DateTime         @default(now())
+
+  @@index([articleId])
 }

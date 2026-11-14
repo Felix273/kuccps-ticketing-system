@@ -1,5 +1,17 @@
 import React, { useState, useMemo } from 'react';
-import { X, User, Mail, FileText, Calendar, AlertCircle, Clock, CheckCircle, Filter, Search } from 'lucide-react';
+import { 
+  X, 
+  User, 
+  Mail, 
+  Calendar, 
+  AlertCircle, 
+  Clock, 
+  CheckCircle2, 
+  Search, 
+  ArrowRightLeft,
+  FileText 
+} from 'lucide-react';
+import { PRIORITY_LEVELS, normalizePriority } from '../../utils/constants';
 
 export const UserTicketsDrawer = ({ user, tickets = [], onClose, onReassign }) => {
   const [filterStatus, setFilterStatus] = useState('all');
@@ -15,8 +27,9 @@ export const UserTicketsDrawer = ({ user, tickets = [], onClose, onReassign }) =
   const filteredTickets = useMemo(() => {
     return userTickets.filter(ticket => {
       const matchesStatus = filterStatus === 'all' || ticket.status === filterStatus;
-      const matchesPriority = filterPriority === 'all' || ticket.priority === filterPriority;
+      const matchesPriority = filterPriority === 'all' || normalizePriority(ticket.priority) === filterPriority;
       const matchesSearch = 
+        !searchQuery.trim() ||
         ticket.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         ticket.ticketNumber?.toLowerCase().includes(searchQuery.toLowerCase());
       
@@ -29,187 +42,250 @@ export const UserTicketsDrawer = ({ user, tickets = [], onClose, onReassign }) =
     total: userTickets.length,
     open: userTickets.filter(t => t.status === 'Open').length,
     inProgress: userTickets.filter(t => t.status === 'In Progress').length,
-    resolved: userTickets.filter(t => t.status === 'Resolved' || t.status === 'Closed').length,
-    critical: userTickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved').length
+    onHold: userTickets.filter(t => t.status === 'On Hold').length,
+    resolved: userTickets.filter(t => t.status === 'Resolved').length,
+    closed: userTickets.filter(t => t.status === 'Closed').length
   };
 
-  const getPriorityColor = (priority) => {
-    const colors = {
-      Low: 'bg-green-100 text-green-700 border-green-200',
-      Medium: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-      High: 'bg-orange-100 text-orange-700 border-orange-200',
-      Critical: 'bg-red-100 text-red-700 border-red-200'
-    };
-    return colors[priority] || colors.Medium;
-  };
-
-  const getStatusIcon = (status) => {
+  const renderStatus = (status) => {
     switch (status) {
-      case 'Open': return <AlertCircle className="w-4 h-4" />;
-      case 'In Progress': return <Clock className="w-4 h-4" />;
+      case 'Open':
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-blue-700 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+            Open
+          </span>
+        );
+      case 'In Progress':
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-amber-700 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+            In Progress
+          </span>
+        );
+      case 'On Hold':
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-orange-700 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
+            On Hold
+          </span>
+        );
       case 'Resolved':
-      case 'Closed': return <CheckCircle className="w-4 h-4" />;
-      default: return <AlertCircle className="w-4 h-4" />;
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-emerald-700 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+            Resolved
+          </span>
+        );
+      case 'Closed':
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-zinc-500 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-zinc-400"></span>
+            Closed
+          </span>
+        );
+      default:
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-zinc-500">
+            <span className="w-1.5 h-1.5 rounded-full bg-zinc-400"></span>
+            {status || 'Normal'}
+          </span>
+        );
     }
   };
 
-  const getStatusColor = (status) => {
-    const colors = {
-      Open: 'bg-blue-100 text-blue-700',
-      'In Progress': 'bg-purple-100 text-purple-700',
-      Resolved: 'bg-green-100 text-green-700',
-      Closed: 'bg-gray-100 text-gray-700'
-    };
-    return colors[status] || colors.Open;
+  const renderPriority = (priority) => {
+    const displayPriority = normalizePriority(priority);
+    switch (displayPriority) {
+      case 'Critical':
+      case 'Very High':
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-rose-700 font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-pulse"></span>
+            {displayPriority}
+          </span>
+        );
+      case 'High':
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-amber-700 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+            High
+          </span>
+        );
+      default:
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-zinc-500">
+            <span className="w-1.5 h-1.5 rounded-full bg-zinc-400"></span>
+            {displayPriority || 'Medium'}
+          </span>
+        );
+    }
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end justify-end z-50">
-      <div className="bg-white h-full w-full md:w-2/3 lg:w-1/2 shadow-2xl flex flex-col animate-slide-in">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-[#911414] to-[#d20001] text-white p-6">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <h2 className="text-2xl font-bold flex items-center gap-2">
-                <User className="w-6 h-6" />
-                {user.name}'s Tickets
+    <div className="fixed inset-0 bg-zinc-950/60 backdrop-blur-xs flex items-end justify-end z-50 font-sans">
+      <div className="bg-white h-full w-full max-w-xl border-l border-zinc-200 shadow-2xl flex flex-col animate-slide-in">
+        
+        {/* 1. HEADER (No Solid Red Banner) */}
+        <div className="p-5 border-b border-zinc-200 bg-white">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1 min-w-0">
+              <span className="font-mono text-xs text-zinc-400">
+                Personnel Queue / <strong className="text-zinc-900 font-bold">@{user.username || 'staff'}</strong>
+              </span>
+
+              <h2 className="text-lg font-bold tracking-tight text-zinc-900 flex items-center gap-2 mt-1 truncate">
+                <User className="w-4 h-4 text-[#990024] shrink-0" />
+                <span>{user.name}'s Assigned Queue</span>
               </h2>
-              <p className="text-white/80 mt-1 flex items-center gap-2">
-                <Mail className="w-4 h-4" />
+
+              <p className="font-mono text-xs text-zinc-400 truncate">
                 {user.email}
               </p>
             </div>
+
             <button
               onClick={onClose}
-              className="text-white hover:bg-white/20 rounded-lg p-2 transition-colors"
+              className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors cursor-pointer shrink-0"
+              title="Close Drawer"
             >
-              <X className="w-6 h-6" />
+              <X className="w-5 h-5" />
             </button>
-          </div>
-
-          {/* Quick Stats */}
-          <div className="grid grid-cols-4 gap-2">
-            <div className="bg-white/20 rounded-lg p-2 text-center">
-              <p className="text-2xl font-bold">{stats.total}</p>
-              <p className="text-xs">Total</p>
-            </div>
-            <div className="bg-white/20 rounded-lg p-2 text-center">
-              <p className="text-2xl font-bold">{stats.open}</p>
-              <p className="text-xs">Open</p>
-            </div>
-            <div className="bg-white/20 rounded-lg p-2 text-center">
-              <p className="text-2xl font-bold">{stats.inProgress}</p>
-              <p className="text-xs">Active</p>
-            </div>
-            <div className="bg-white/20 rounded-lg p-2 text-center">
-              <p className="text-2xl font-bold">{stats.resolved}</p>
-              <p className="text-xs">Done</p>
-            </div>
           </div>
         </div>
 
-        {/* Filters */}
-        <div className="p-4 border-b border-gray-200 bg-gray-50">
-          <div className="space-y-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <input
-                type="text"
-                placeholder="Search tickets..."
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#911414] focus:border-transparent text-sm"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
+        {/* 2. HAIRLINE KPI STRIP */}
+        <div className="border-b border-zinc-200 bg-zinc-50/60 grid grid-cols-3 sm:grid-cols-6 divide-x divide-zinc-200 font-mono text-center">
+          <div className="p-3">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold block mb-0.5">Total</span>
+            <div className="text-xl font-bold text-zinc-900 tabular-nums">{stats.total}</div>
+          </div>
+          <div className="p-3">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold block mb-0.5">Open</span>
+            <div className="text-xl font-bold text-zinc-900 tabular-nums">{stats.open}</div>
+          </div>
+          <div className="p-3">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold block mb-0.5">In Progress</span>
+            <div className="text-xl font-bold text-amber-700 tabular-nums">{stats.inProgress}</div>
+          </div>
+          <div className="p-3">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold block mb-0.5">On Hold</span>
+            <div className="text-xl font-bold text-orange-700 tabular-nums">{stats.onHold}</div>
+          </div>
+          <div className="p-3">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold block mb-0.5">Resolved</span>
+            <div className="text-xl font-bold text-emerald-700 tabular-nums">{stats.resolved}</div>
+          </div>
+          <div className="p-3">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold block mb-0.5">Closed</span>
+            <div className="text-xl font-bold text-zinc-600 tabular-nums">{stats.closed}</div>
+          </div>
+        </div>
 
-            <div className="flex gap-2">
+        {/* 3. PRECISION TOOLBAR */}
+        <div className="p-3.5 border-b border-zinc-200 bg-white space-y-2.5">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Filter assigned tickets..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-8 pr-3 py-1 text-xs font-sans bg-zinc-50 border border-zinc-200 rounded text-zinc-800 placeholder-zinc-400 focus:outline-none focus:border-[#990024] focus:bg-white"
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex gap-2 font-mono text-xs">
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#911414] focus:border-transparent"
+                className="px-2 py-1 bg-zinc-50 border border-zinc-200 rounded text-zinc-600 focus:outline-none focus:border-[#990024] text-xs"
               >
-                <option value="all">All Status</option>
+                <option value="all">Status: All</option>
                 <option value="Open">Open</option>
                 <option value="In Progress">In Progress</option>
+                <option value="On Hold">On Hold</option>
                 <option value="Resolved">Resolved</option>
+                <option value="Closed">Closed</option>
               </select>
 
               <select
                 value={filterPriority}
                 onChange={(e) => setFilterPriority(e.target.value)}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#911414] focus:border-transparent"
+                className="px-2 py-1 bg-zinc-50 border border-zinc-200 rounded text-zinc-600 focus:outline-none focus:border-[#990024] text-xs"
               >
-                <option value="all">All Priority</option>
-                <option value="Low">Low</option>
-                <option value="Medium">Medium</option>
-                <option value="High">High</option>
-                <option value="Critical">Critical</option>
+                <option value="all">Priority: All</option>
+                {PRIORITY_LEVELS.map(priority => <option key={priority} value={priority}>{priority}</option>)}
               </select>
             </div>
 
-            <p className="text-xs text-gray-600">
-              Showing {filteredTickets.length} of {userTickets.length} tickets
-            </p>
+            <span className="font-mono text-[11px] text-zinc-400">
+              {filteredTickets.length} of {userTickets.length}
+            </span>
           </div>
         </div>
 
-        {/* Tickets List */}
-        <div className="flex-1 overflow-y-auto p-4">
+        {/* 4. TICKET CARDS LIST */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {filteredTickets.length > 0 ? (
-            <div className="space-y-3">
-              {filteredTickets.map(ticket => (
-                <div 
-                  key={ticket.id}
-                  className="bg-white border-2 border-gray-200 rounded-lg p-4 hover:border-[#911414] hover:shadow-md transition-all"
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs font-mono text-gray-500">{ticket.ticketNumber}</span>
-                        <span className={`px-2 py-0.5 text-xs rounded border font-medium ${getPriorityColor(ticket.priority)}`}>
-                          {ticket.priority}
-                        </span>
-                        <span className={`px-2 py-0.5 text-xs rounded font-medium flex items-center gap-1 ${getStatusColor(ticket.status)}`}>
-                          {getStatusIcon(ticket.status)}
-                          {ticket.status}
-                        </span>
-                      </div>
-                      <h4 className="font-semibold text-gray-900 mb-1">{ticket.subject}</h4>
-                      <p className="text-sm text-gray-600 line-clamp-2">{ticket.description}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs text-gray-500 mt-3 pt-3 border-t border-gray-200">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="w-3 h-3" />
-                      <span>{new Date(ticket.createdAt).toLocaleDateString()}</span>
-                    </div>
-                    {onReassign && (
-                      <button
-                        onClick={() => onReassign(ticket)}
-                        className="px-3 py-1 bg-[#911414] text-white rounded hover:bg-[#ac0807] font-medium transition-colors"
-                      >
-                        Transfer Claim
-                      </button>
-                    )}
+            filteredTickets.map(ticket => (
+              <div 
+                key={ticket.id}
+                className="bg-white border border-zinc-200 rounded-lg p-4 hover:border-zinc-300 transition-all space-y-2.5"
+              >
+                {/* Identifier & Micro-dots */}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs font-semibold text-zinc-500">
+                    #{ticket.ticketNumber}
+                  </span>
+                  
+                  <div className="flex items-center gap-3">
+                    {renderPriority(ticket.priority)}
+                    {renderStatus(ticket.status)}
                   </div>
                 </div>
-              ))}
-            </div>
+
+                {/* Subject & Description */}
+                <div>
+                  <h4 className="font-semibold text-xs sm:text-sm text-zinc-900 leading-snug">
+                    {ticket.subject}
+                  </h4>
+                  <p className="text-xs text-zinc-500 line-clamp-2 mt-1 leading-relaxed">
+                    {ticket.description || 'No additional details provided.'}
+                  </p>
+                </div>
+
+                {/* Card Footer: Date & Transfer Action */}
+                <div className="flex items-center justify-between pt-2.5 border-t border-zinc-100 text-xs font-mono">
+                  <div className="flex items-center gap-1.5 text-zinc-400 text-[11px] tabular-nums">
+                    <Calendar className="w-3 h-3" />
+                    <span>{new Date(ticket.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                  </div>
+
+                  {onReassign && (
+                    <button
+                      onClick={() => onReassign(ticket)}
+                      className="px-2.5 py-1 text-xs font-mono font-semibold border border-zinc-200 rounded text-zinc-700 hover:text-[#990024] hover:border-[#990024] bg-white transition-colors cursor-pointer flex items-center gap-1"
+                    >
+                      <ArrowRightLeft className="w-3 h-3" />
+                      <span>Transfer Claim</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
           ) : (
-            <div className="text-center py-12">
-              <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-700 mb-2">
-                {userTickets.length === 0 ? 'No Tickets Claimed' : 'No Tickets Match Filters'}
-              </h3>
-              <p className="text-gray-500">
-                {userTickets.length === 0 
-                  ? 'This user has no tickets claimed yet.'
-                  : 'Try adjusting your filters to see more tickets.'}
+            <div className="border border-zinc-200 rounded-lg p-10 text-center font-mono my-4">
+              <FileText className="w-8 h-8 text-zinc-300 mx-auto mb-2" />
+              <h4 className="text-xs font-bold text-zinc-800">NO_ASSIGNED_TICKETS</h4>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                {userTickets.length === 0 ? 'No tickets are currently assigned to this user.' : 'No tickets match the selected filters.'}
               </p>
             </div>
           )}
         </div>
+
       </div>
     </div>
   );

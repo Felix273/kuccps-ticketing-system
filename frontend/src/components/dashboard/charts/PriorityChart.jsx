@@ -11,7 +11,7 @@ const COLORS = {
 export const PriorityChart = ({ data }) => (
   <div className="bg-white rounded-xl shadow-lg p-6">
     <h3 className="text-lg font-semibold text-gray-900 mb-6">Priority Distribution</h3>
-    <ResponsiveContainer width="100%" height={280}>
+    <ResponsiveContainer width="100%" height={280} initialDimension={{ width: 400, height: 280 }}>
       <PieChart>
         <Pie
           data={data}

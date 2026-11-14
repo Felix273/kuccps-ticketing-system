@@ -4,7 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 export const VolumeByHourChart = ({ data }) => (
   <div className="bg-white rounded-xl shadow-lg p-6">
     <h3 className="text-lg font-semibold text-gray-900 mb-6">Ticket Volume by Hour</h3>
-    <ResponsiveContainer width="100%" height={280}>
+    <ResponsiveContainer width="100%" height={280} initialDimension={{ width: 400, height: 280 }}>
       <BarChart data={data}>
         <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
         <XAxis 

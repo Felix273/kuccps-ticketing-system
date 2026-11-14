@@ -3,44 +3,179 @@
 @tailwind utilities;
 
 :root {
-  --brand-primary: #911414;
-  --brand-secondary: #d20001;
-}
-
-body.theme-high-contrast {
-  filter: contrast(1.08);
-}
-
-body.theme-dark {
-  background: #111827;
-  color: #f9fafb;
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-headline: 'Barlow Condensed', 'Montserrat', 'Geist', sans-serif;
+  --font-mono: 'Geist Mono', monospace;
+  --color-border: #e4e4e7;
+  --brand-primary: #990024;
 }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: var(--font-sans);
+  background-color: #fafafa;
+  color: #09090b;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-#root {
+.admin-settings {
+  font-family: var(--font-sans);
+}
+
+.admin-settings :where(button, input, select, textarea) {
+  font-family: inherit;
+}
+
+.settings-shell-card {
+  border: 1px solid #e4e4e7;
+  border-radius: 0.75rem;
+  background-color: #fff;
+  box-shadow: 0 1px 2px rgb(9 9 11 / 4%);
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+.font-headline {
+  font-family: var(--font-headline);
+  letter-spacing: -0.04em;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.settings-sections > div {
+  padding: 1.25rem;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.settings-sections > div > h3,
+.settings-form > h3 {
+  margin-bottom: 1rem;
+  color: #18181b;
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.settings-content input:not([type='checkbox']):not([type='color']),
+.settings-content select,
+.settings-content textarea,
+.settings-field {
   width: 100%;
-  min-height: 100vh;
+  min-width: 0;
+  border: 1px solid #d4d4d8;
+  border-radius: 0.625rem;
+  background-color: #fff;
+  color: #27272a;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
-
-/* Drawer animation */
-@keyframes slide-in {
-  from {
-    transform: translateX(100%);
-  }
-  to {
-    transform: translateX(0);
-  }
+.settings-content input:not([type='checkbox']):not([type='color']),
+.settings-content select,
+.settings-field {
+  min-height: 2.75rem;
+  padding: 0.625rem 0.75rem;
 }
 
-.animate-slide-in {
-  animation: slide-in 0.3s ease-out;
+.settings-content textarea {
+  padding: 0.75rem;
+  resize: vertical;
+}
+
+.settings-content input:not([type='checkbox']):not([type='color']):focus,
+.settings-content select:focus,
+.settings-content textarea:focus,
+.settings-field:focus {
+  outline: none;
+  border-color: #990024;
+  box-shadow: 0 0 0 3px rgb(153 0 36 / 10%);
+}
+
+.settings-content input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+  accent-color: #990024;
+}
+
+.settings-content input[type='color'] {
+  width: 100%;
+  height: 2.75rem;
+  padding: 0.25rem;
+  border: 1px solid #d4d4d8;
+  border-radius: 0.625rem;
+  background: #fff;
+  cursor: pointer;
+}
+
+.settings-content label {
+  color: #3f3f46;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.settings-form > button[type='submit'] {
+  width: auto;
+  align-self: flex-end;
+  min-height: 2.75rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.625rem;
+  background: #990024;
+  font-size: 0.875rem;
+  font-weight: 650;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.settings-form > button[type='submit']:hover:not(:disabled) {
+  background: #80001e;
+  box-shadow: 0 4px 12px rgb(153 0 36 / 16%);
+}
+
+.settings-form > button[type='submit']:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.settings-content-inner h3 {
+  color: #18181b;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.settings-content-inner h4 {
+  color: #18181b;
+}
+
+.settings-content-inner article {
+  border-color: #e4e4e7;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.settings-content-inner :where(input, select, textarea):disabled {
+  cursor: not-allowed;
+  background-color: #f4f4f5;
+  color: #71717a;
+}
+
+@media (max-width: 640px) {
+  .settings-sections > div {
+    padding: 1rem;
+  }
+
+  .settings-content {
+    padding: 1rem;
+  }
+
+  .settings-form > button[type='submit'] {
+    width: 100%;
+    align-self: stretch;
+  }
 }

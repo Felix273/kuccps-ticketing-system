@@ -1,0 +1,204 @@
+/* Docusaurus custom CSS for KUCCPS Ticketing System docs */
+
+:root {
+  --ifm-color-primary: #911414;
+  --ifm-color-primary-dark: #7a1010;
+  --ifm-color-primary-darker: #6b0e0e;
+  --ifm-color-primary-darkest: #4a0a0a;
+  --ifm-color-primary-light: #a51919;
+  --ifm-color-primary-lighter: #b31d1d;
+  --ifm-color-primary-lightest: #c42222;
+  --ifm-font-color-base: #24292f;
+  --ifm-background-color: #ffffff;
+  --ifm-heading-color: #1a1a1a;
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #d20001;
+  --ifm-color-primary-dark: #b00001;
+  --ifm-color-primary-darker: #9a0001;
+  --ifm-color-primary-darkest: #6d0001;
+  --ifm-color-primary-light: #e10802;
+  --ifm-color-primary-lighter: #e81a14;
+  --ifm-color-primary-lightest: #f03d35;
+  --ifm-background-color: #1a1a1a;
+  --ifm-font-color-base: #e0e0e0;
+  --ifm-heading-color: #ffffff;
+}
+
+.navbar {
+  background: linear-gradient(135deg, var(--ifm-color-primary) 0%, var(--ifm-color-primary-dark) 100%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.navbar__brand {
+  color: #fff !important;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.navbar__link {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.navbar__link:hover {
+  color: #fff !important;
+}
+
+.navbar__toggle {
+  color: #fff !important;
+}
+
+.footer {
+  background: #1a1a1a;
+  color: #e0e0e0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.footer a {
+  color: #d20001;
+}
+
+.footer a:hover {
+  color: #ff3333;
+}
+
+.hero__title {
+  font-size: 3rem;
+  font-weight: 800;
+  color: var(--ifm-color-primary);
+}
+
+.hero__subtitle {
+  font-size: 1.25rem;
+  color: #666;
+}
+
+[data-theme='dark'] .hero__subtitle {
+  color: #aaa;
+}
+
+.card {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: all 0.2s ease;
+}
+
+[data-theme='dark'] .card {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(145, 20, 20, 0.15);
+}
+
+.admonition {
+  border-radius: 8px;
+  border-left: 4px solid var(--ifm-color-primary);
+}
+
+.admonition-icon {
+  color: var(--ifm-color-primary);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--ifm-heading-color);
+  font-weight: 700;
+}
+
+h2 {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  padding-bottom: 0.3em;
+}
+
+[data-theme='dark'] h2 {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.mermaid {
+  text-align: center;
+  margin: 2em 0;
+}
+
+.code-block-lines {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+pre {
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='dark'] pre {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.table-of-contents {
+  border-left: 2px solid rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='dark'] .table-of-contents {
+  border-left: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.menu__link--active {
+  color: var(--ifm-color-primary) !important;
+  border-left: 3px solid var(--ifm-color-primary);
+}
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 0;
+  }
+
+  .navbar,
+  .theme-doc-sidebar-container,
+  .menu,
+  .table-of-contents,
+  .footer,
+  .pagination-nav {
+    display: block !important;
+  }
+
+  .navbar {
+    display: flex !important;
+  }
+
+  .navbar__toggle {
+    display: none !important;
+  }
+
+  .navbar__items,
+  .navbar__brand,
+  .navbar__item {
+    display: flex !important;
+  }
+
+  [class*='docSidebarContainer'] {
+    display: block !important;
+    flex: 0 0 var(--doc-sidebar-width) !important;
+    width: var(--doc-sidebar-width) !important;
+  }
+
+  [class*='docRoot'] {
+    display: flex !important;
+  }
+
+  [class*='sidebarViewport'],
+  [class*='sidebar_'] {
+    height: auto !important;
+    max-height: none !important;
+    position: static !important;
+  }
+
+  .theme-doc-sidebar-container {
+    flex: 0 0 var(--doc-sidebar-width) !important;
+  }
+
+  .table-of-contents {
+    position: static;
+  }
+}

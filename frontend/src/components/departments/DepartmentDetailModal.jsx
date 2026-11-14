@@ -1,5 +1,16 @@
 import React, { useState, useMemo } from 'react';
-import { X, Users, FileText, TrendingUp, AlertCircle, User, Mail, ArrowRight, Building2 } from 'lucide-react';
+import { 
+  X, 
+  Users, 
+  Building2, 
+  AlertTriangle, 
+  Clock, 
+  Mail, 
+  ChevronRight, 
+  ArrowUpRight,
+  CheckCircle2,
+  Ticket
+} from 'lucide-react';
 
 export const DepartmentDetailModal = ({ department, tickets = [], users = [], onClose, onViewUserTickets }) => {
   const [sortBy, setSortBy] = useState('tickets');
@@ -16,6 +27,7 @@ export const DepartmentDetailModal = ({ department, tickets = [], users = [], on
   const deptTickets = useMemo(() => {
     return tickets.filter(t => 
       t.department?.name === department.name || 
+      t.departmentId === department.id ||
       deptUsers.some(u => u.id === t.assignedToId)
     );
   }, [tickets, department, deptUsers]);
@@ -25,22 +37,26 @@ export const DepartmentDetailModal = ({ department, tickets = [], users = [], on
       const userTickets = deptTickets.filter(t => t.assignedToId === user.id);
       const open = userTickets.filter(t => t.status === 'Open').length;
       const inProgress = userTickets.filter(t => t.status === 'In Progress').length;
-      const resolved = userTickets.filter(t => t.status === 'Resolved' || t.status === 'Closed').length;
-      const critical = userTickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved').length;
+      const onHold = userTickets.filter(t => t.status === 'On Hold').length;
+      const resolved = userTickets.filter(t => t.status === 'Resolved').length;
+      const closed = userTickets.filter(t => t.status === 'Closed').length;
+      const critical = userTickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved' && t.status !== 'Closed').length;
       
       return {
         ...user,
         ticketCount: userTickets.length,
         open,
         inProgress,
+        onHold,
         resolved,
+        closed,
         critical,
-        workload: open + inProgress
+        workload: open + inProgress + onHold
       };
     }).sort((a, b) => {
       if (sortBy === 'tickets') return b.ticketCount - a.ticketCount;
       if (sortBy === 'workload') return b.workload - a.workload;
-      return a.name.localeCompare(b.name);
+      return (a.name || '').localeCompare(b.name || '');
     });
   }, [deptUsers, deptTickets, sortBy]);
 
@@ -48,223 +64,236 @@ export const DepartmentDetailModal = ({ department, tickets = [], users = [], on
     totalTickets: deptTickets.length,
     open: deptTickets.filter(t => t.status === 'Open').length,
     inProgress: deptTickets.filter(t => t.status === 'In Progress').length,
-    resolved: deptTickets.filter(t => t.status === 'Resolved' || t.status === 'Closed').length,
-    critical: deptTickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved').length,
+    onHold: deptTickets.filter(t => t.status === 'On Hold').length,
+    resolved: deptTickets.filter(t => t.status === 'Resolved').length,
+    closed: deptTickets.filter(t => t.status === 'Closed').length,
+    critical: deptTickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved' && t.status !== 'Closed').length,
     unclaimed: deptTickets.filter(t => !t.assignedToId).length
   };
 
   const resolutionRate = deptStats.totalTickets > 0 
-    ? Math.round((deptStats.resolved / deptStats.totalTickets) * 100) 
+    ? Math.round(((deptStats.resolved + deptStats.closed) / deptStats.totalTickets) * 100) 
     : 0;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
-      <div className="bg-white rounded-t-xl sm:rounded-xl shadow-2xl w-full sm:max-w-5xl h-[95vh] sm:max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-[#911414] to-[#d20001] text-white p-4 sm:p-6 rounded-t-xl sticky top-0 z-10">
-          <div className="flex justify-between items-start gap-2">
-            <div className="flex-1 min-w-0">
-              <h2 className="text-xl sm:text-3xl font-bold flex items-center gap-2 sm:gap-3 mb-1">
-                <Building2 className="w-6 h-6 sm:w-8 sm:h-8 flex-shrink-0" />
+    <div className="fixed inset-0 bg-zinc-950/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 font-sans">
+      <div className="bg-white rounded-xl border border-zinc-200 shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        
+        {/* 1. HEADER (No Solid Red Banner) */}
+        <div className="p-5 sm:p-6 border-b border-zinc-200 bg-white">
+          <div className="flex items-start justify-between gap-4">
+            
+            <div className="space-y-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs text-zinc-400">
+                  Departments / <strong className="text-zinc-900 font-bold">{department.code || 'DIRECTORATE'}</strong>
+                </span>
+                {department.code && (
+                  <span className="px-1.5 py-0.2 rounded font-mono text-[10px] font-bold bg-red-50 text-[#990024] border border-red-100">
+                    {department.code}
+                  </span>
+                )}
+              </div>
+
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900 flex items-center gap-2.5 truncate mt-1">
+                <Building2 className="w-5 h-5 text-[#990024] shrink-0" />
                 <span className="truncate">{department.name}</span>
               </h2>
-              <p className="text-white/80 text-sm sm:text-base">
-                {deptUsers.length} Staff • {deptStats.totalTickets} Tickets
+
+              <p className="font-mono text-xs text-zinc-500 tabular-nums">
+                {deptUsers.length} Staff Assigned • {deptStats.totalTickets} Active Logged Tickets
               </p>
             </div>
+
             <button
               onClick={onClose}
-              className="text-white hover:bg-white/20 rounded-lg p-2 transition-colors flex-shrink-0"
+              className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors cursor-pointer shrink-0"
+              title="Close (Esc)"
             >
-              <X className="w-5 h-5 sm:w-6 sm:h-6" />
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-          {/* Department Statistics - Mobile Optimized */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
-            <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg sm:rounded-xl p-3 sm:p-4 border border-orange-200">
-              <p className="text-xs sm:text-sm font-medium text-orange-600 mb-1">Open</p>
-              <p className="text-2xl sm:text-3xl font-bold text-orange-700">{deptStats.open}</p>
+        {/* 2. MODAL BODY */}
+        <div className="p-5 sm:p-6 overflow-y-auto space-y-5">
+          
+          {/* Hairline Connected KPI Strip (NO Pastel Cartoon Boxes) */}
+          <div className="border border-zinc-200 bg-white grid grid-cols-2 sm:grid-cols-3 divide-x divide-y sm:divide-y-0 divide-zinc-200 font-mono">
+            <div className="p-3.5">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold block mb-1">
+                Open Queue
+              </span>
+              <div className="text-2xl font-bold text-zinc-900 tabular-nums">
+                {deptStats.open}
+              </div>
             </div>
-            <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg sm:rounded-xl p-3 sm:p-4 border border-purple-200">
-              <p className="text-xs sm:text-sm font-medium text-purple-600 mb-1">In Progress</p>
-              <p className="text-2xl sm:text-3xl font-bold text-purple-700">{deptStats.inProgress}</p>
+
+            <div className="p-3.5">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold block mb-1">
+                In Progress
+              </span>
+              <div className="text-2xl font-bold text-amber-700 tabular-nums">
+                {deptStats.inProgress}
+              </div>
             </div>
-            <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg sm:rounded-xl p-3 sm:p-4 border border-green-200">
-              <p className="text-xs sm:text-sm font-medium text-green-600 mb-1">Resolved</p>
-              <p className="text-2xl sm:text-3xl font-bold text-green-700">{deptStats.resolved}</p>
+
+            <div className="p-3.5">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold block mb-1">
+                On Hold
+              </span>
+              <div className="text-2xl font-bold text-orange-700 tabular-nums">
+                {deptStats.onHold}
+              </div>
             </div>
-            <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg sm:rounded-xl p-3 sm:p-4 border border-blue-200">
-              <p className="text-xs sm:text-sm font-medium text-blue-600 mb-1 truncate">Resolution</p>
-              <p className="text-2xl sm:text-3xl font-bold text-blue-700">{resolutionRate}%</p>
+
+            <div className="p-3.5">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold block mb-1">
+                Resolved
+              </span>
+              <div className="text-2xl font-bold text-emerald-700 tabular-nums">
+                {deptStats.resolved}
+              </div>
+            </div>
+
+            <div className="p-3.5">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold block mb-1">
+                Closed
+              </span>
+              <div className="text-2xl font-bold text-zinc-600 tabular-nums">
+                {deptStats.closed}
+              </div>
+            </div>
+
+            <div className="p-3.5">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-semibold block mb-1">
+                Throughput
+              </span>
+              <div className="text-2xl font-bold text-zinc-900 tabular-nums">
+                {resolutionRate}%
+              </div>
+              <div className="w-full h-1 bg-zinc-100 rounded-full mt-2 overflow-hidden">
+                <div className="h-full bg-[#990024]" style={{ width: `${resolutionRate}%` }} />
+              </div>
             </div>
           </div>
 
-          {/* Alerts */}
-          {deptStats.critical > 0 && (
-            <div className="bg-red-50 border-l-4 border-red-500 p-3 sm:p-4 rounded">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                <p className="text-xs sm:text-sm font-semibold text-red-800">
-                  {deptStats.critical} Critical ticket{deptStats.critical > 1 ? 's' : ''} require immediate attention
-                </p>
-              </div>
+          {/* Hairline Warning Notices */}
+          {(deptStats.critical > 0 || deptStats.unclaimed > 0) && (
+            <div className="space-y-2">
+              {deptStats.critical > 0 && (
+                <div className="flex items-center justify-between p-3 rounded-lg border border-rose-200 bg-rose-50/60 text-xs font-mono text-rose-800">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse"></span>
+                    <span className="font-semibold">{deptStats.critical} critical ticket(s) require immediate officer escalation</span>
+                  </div>
+                  <span className="font-bold underline cursor-pointer">View</span>
+                </div>
+              )}
+
+              {deptStats.unclaimed > 0 && (
+                <div className="flex items-center justify-between p-3 rounded-lg border border-amber-200 bg-amber-50/60 text-xs font-mono text-amber-800">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-3.5 h-3.5 text-amber-600" />
+                    <span>{deptStats.unclaimed} unassigned ticket(s) awaiting claim in this directorate</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {deptStats.unclaimed > 0 && (
-            <div className="bg-yellow-50 border-l-4 border-yellow-500 p-3 sm:p-4 rounded">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-                <p className="text-xs sm:text-sm font-semibold text-yellow-800">
-                  {deptStats.unclaimed} unclaimed ticket{deptStats.unclaimed > 1 ? 's' : ''} in this department
-                </p>
+          {/* 3. DEPARTMENT STAFF LIST */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-zinc-100">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-zinc-500" />
+                <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-zinc-900">
+                  Assigned Department Staff
+                </h3>
+                <span className="font-mono text-xs text-zinc-400">({userStats.length})</span>
               </div>
-            </div>
-          )}
 
-          {/* Staff List */}
-          <div>
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-4 mb-3 sm:mb-4">
-              <h3 className="text-lg sm:text-xl font-bold text-gray-900 flex items-center gap-2">
-                <Users className="w-5 h-5 sm:w-6 sm:h-6 text-[#911414]" />
-                Department Staff
-              </h3>
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
-                className="w-full sm:w-auto px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#911414] focus:border-transparent"
+                className="text-xs font-mono bg-zinc-50 border border-zinc-200 rounded px-2 py-1 text-zinc-700 focus:outline-none"
               >
-                <option value="tickets">Sort by: Most Tickets</option>
-                <option value="workload">Sort by: Workload</option>
-                <option value="name">Sort by: Name</option>
+                <option value="tickets">Sort: Most Tickets</option>
+                <option value="workload">Sort: Active Workload</option>
+                <option value="name">Sort: Name (A-Z)</option>
               </select>
             </div>
 
             {userStats.length > 0 ? (
-              <div className="space-y-2 sm:space-y-3">
-                {userStats.map(user => (
-                  <div 
-                    key={user.id}
-                    onClick={() => onViewUserTickets(user)}
-                    className="bg-white border-2 border-gray-200 rounded-lg sm:rounded-xl p-3 sm:p-4 hover:border-[#911414] hover:shadow-lg transition-all cursor-pointer"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                        <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-[#911414] to-[#d20001] rounded-full flex items-center justify-center flex-shrink-0">
-                          <span className="text-white text-xs sm:text-sm font-bold">
-                            {user.name?.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) || 'U'}
-                          </span>
+              <div className="divide-y divide-zinc-100 border border-zinc-200 rounded-lg overflow-hidden bg-white">
+                {userStats.map(user => {
+                  const initials = user.name
+                    ? user.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
+                    : 'U';
+
+                  return (
+                    <div 
+                      key={user.id}
+                      onClick={() => onViewUserTickets(user)}
+                      className="p-3.5 flex items-center justify-between hover:bg-zinc-50/80 transition-colors cursor-pointer group"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-8 h-8 rounded-full bg-zinc-100 border border-zinc-200 text-[#990024] font-mono font-bold text-xs flex items-center justify-center shrink-0">
+                          {initials}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className="font-bold text-sm sm:text-base text-gray-900 truncate">{user.name}</h4>
-                          <div className="flex flex-wrap items-center gap-1 sm:gap-2 text-xs text-gray-600 mt-1">
-                            <span className="flex items-center gap-1 truncate">
-                              <Mail className="w-3 h-3 flex-shrink-0" />
-                              <span className="truncate">{user.email}</span>
-                            </span>
-                            <span className="px-2 py-0.5 bg-gray-100 rounded font-medium flex-shrink-0">
-                              {user.role}
-                            </span>
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-bold text-zinc-900 group-hover:text-[#990024] transition-colors truncate">
+                            {user.name}
+                          </h4>
+                          <div className="flex items-center gap-2 font-mono text-[10px] text-zinc-400">
+                            <span className="truncate">{user.email}</span>
+                            <span>•</span>
+                            <span className="uppercase text-zinc-600">{user.role}</span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
-                        {/* Ticket counts - Simplified on mobile */}
-                        <div className="hidden sm:flex gap-3 text-sm">
-                          {user.open > 0 && (
-                            <div className="text-center">
-                              <p className="font-bold text-orange-600">{user.open}</p>
-                              <p className="text-xs text-gray-500">Open</p>
-                            </div>
-                          )}
-                          {user.inProgress > 0 && (
-                            <div className="text-center">
-                              <p className="font-bold text-purple-600">{user.inProgress}</p>
-                              <p className="text-xs text-gray-500">Active</p>
-                            </div>
-                          )}
-                          {user.resolved > 0 && (
-                            <div className="text-center">
-                              <p className="font-bold text-green-600">{user.resolved}</p>
-                              <p className="text-xs text-gray-500">Done</p>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Total tickets badge */}
-                        <div className="bg-[#911414] text-white rounded-lg px-3 py-1.5 sm:px-4 sm:py-2 min-w-[60px] sm:min-w-[80px] text-center">
-                          <p className="text-lg sm:text-2xl font-bold">{user.ticketCount}</p>
-                          <p className="text-xs">Ticket{user.ticketCount !== 1 ? 's' : ''}</p>
-                        </div>
-
-                        {/* Critical indicator */}
-                        {user.critical > 0 && (
-                          <div className="bg-red-100 text-red-700 rounded-lg px-2 py-1 sm:px-3 sm:py-2 flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3 sm:w-4 sm:h-4" />
-                            <span className="text-xs sm:text-sm font-bold">{user.critical}</span>
-                          </div>
-                        )}
-
-                        <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 hidden sm:block" />
-                      </div>
-                    </div>
-
-                    {/* Mobile: Show ticket breakdown */}
-                    <div className="sm:hidden mt-3 pt-3 border-t border-gray-200 flex justify-around text-xs">
-                      {user.open > 0 && (
-                        <div className="text-center">
-                          <p className="font-bold text-orange-600">{user.open}</p>
-                          <p className="text-gray-500">Open</p>
-                        </div>
-                      )}
-                      {user.inProgress > 0 && (
-                        <div className="text-center">
-                          <p className="font-bold text-purple-600">{user.inProgress}</p>
-                          <p className="text-gray-500">Active</p>
-                        </div>
-                      )}
-                      {user.resolved > 0 && (
-                        <div className="text-center">
-                          <p className="font-bold text-green-600">{user.resolved}</p>
-                          <p className="text-gray-500">Done</p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Workload indicator */}
-                    {user.workload > 0 && (
-                      <div className="mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-gray-200">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-gray-600">Active Workload</span>
-                          <span className={`font-semibold ${
-                            user.workload > 15 ? 'text-red-600' :
-                            user.workload > 10 ? 'text-yellow-600' :
-                            'text-green-600'
-                          }`}>
-                            {user.workload} active
-                            {user.workload > 15 && ' - Overloaded!'}
+                      <div className="flex items-center gap-4 shrink-0 font-mono text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded bg-zinc-100 text-zinc-800 font-bold tabular-nums text-[11px]">
+                            {user.ticketCount} tickets
                           </span>
+                          {user.workload > 0 && (
+                            <span className="text-[10px] text-amber-700 font-semibold">
+                              ({user.workload} active)
+                            </span>
+                          )}
                         </div>
+
+                        <ChevronRight className="w-4 h-4 text-zinc-400 group-hover:text-zinc-800 transition-colors" />
                       </div>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
             ) : (
-              <div className="text-center py-8 sm:py-12 bg-gray-50 rounded-xl">
-                <Users className="w-12 h-12 sm:w-16 sm:h-16 text-gray-400 mx-auto mb-3 sm:mb-4" />
-                <h3 className="text-base sm:text-lg font-semibold text-gray-700 mb-2">No Staff Members</h3>
-                <p className="text-sm text-gray-500">
-                  No users are attached to this department yet.
+              <div className="border border-zinc-200 rounded-lg p-10 text-center font-mono">
+                <Users className="w-8 h-8 text-zinc-300 mx-auto mb-2" />
+                <h4 className="text-xs font-bold text-zinc-800">NO_ASSIGNED_PERSONNEL</h4>
+                <p className="text-[11px] text-zinc-400 mt-0.5">
+                  No staff members are currently attached to this directorate.
                 </p>
               </div>
             )}
           </div>
+
         </div>
+
+        {/* 4. FOOTER */}
+        <div className="border-t border-zinc-200 bg-zinc-50/80 p-3.5 px-6 flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-4 py-1.5 border border-zinc-200 bg-white hover:bg-zinc-100 text-zinc-700 text-xs font-mono font-semibold rounded transition-colors cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
+
       </div>
     </div>
   );

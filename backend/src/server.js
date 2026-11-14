@@ -7,6 +7,7 @@ const departmentRoutes = require('./routes/departments');
 const userRoutes = require('./routes/users');
 const publicTicketRoutes = require('./routes/publicTickets');
 const { startEmailMonitoring } = require('./services/emailService');
+const { startNotificationJobs } = require('./services/notificationScheduler');
 const { PrismaClient } = require('@prisma/client');
 const { requestId, securityHeaders, rateLimit, validateProductionConfig } = require('./middleware/security');
 
@@ -94,6 +95,7 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`✓ Server running on port ${PORT}`);
   console.log(`✓ API available at http://localhost:${PORT}`);
+  startNotificationJobs();
 
   // Start email monitoring if credentials are configured
   if (process.env.EMAIL_USER && process.env.IMAP_USER) {
@@ -111,3 +113,39 @@ app.listen(PORT, () => {
 
 module.exports = app;
 // Updated 17 Februari 2026 11:41:36 asubuhi EAT
+
+// ─────────────────────────────────────────────────────────────
+// AUTOMATED ACTIVE DIRECTORY INGESTION ENGINE
+// ─────────────────────────────────────────────────────────────
+const adService = require('./services/adService');
+
+async function runAutomatedAdSync() {
+  try {
+    const settings = await adService.getAdSettings();
+    if (!settings.ldapEnabled || !settings.ldapUrl || !settings.ldapBaseDn) {
+      console.log('ℹ Automated AD Sync skipped: LDAP is not configured or disabled in settings.');
+      return;
+    }
+
+    console.log('🔄 [AD Sync Engine] Pulling directorates and users from Active Directory...');
+    
+    // 1. Sync any defined Directorates from AD
+    const dirResult = await adService.syncDirectorates().catch((err) => {
+      console.warn('ℹ Directorate OU scan note:', err.message);
+      return { count: 0 };
+    });
+
+    // 2. Sync all Users (auto-creates and links Directorates from the user's department attribute)
+    const userResult = await adService.syncUsers();
+
+    console.log(`✓ [AD Sync Engine] Complete: ${dirResult.count || 0} directorates verified, ${userResult.count || 0} users synced and linked.`);
+  } catch (error) {
+    console.error('⚠ [AD Sync Engine] Notice:', error.message);
+  }
+}
+
+// Automatically trigger initial directory harvest 10 seconds after boot
+setTimeout(runAutomatedAdSync, 10000);
+
+// Schedule automatic background refresh every 24 hours
+setInterval(runAutomatedAdSync, 24 * 60 * 60 * 1000);

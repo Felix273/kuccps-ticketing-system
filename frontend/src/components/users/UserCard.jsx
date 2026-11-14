@@ -1,82 +1,70 @@
 import React from 'react';
-import { User, Mail, Building2, Edit, Trash2 } from 'lucide-react';
+import { Mail, Building2, Ticket, Globe } from 'lucide-react';
 
-export const UserCard = ({ user, onEdit, onDelete }) => {
+export const UserCard = ({ user }) => {
   const getRoleBadge = (role) => {
-    const colors = {
-      admin: 'bg-red-100 text-red-700 border-red-200',
-      staff: 'bg-blue-100 text-blue-700 border-blue-200',
-      user: 'bg-gray-100 text-gray-700 border-gray-200'
+    const config = {
+      admin: 'bg-red-50 text-[#990024] border-red-200 font-bold',
+      staff: 'bg-blue-50 text-blue-700 border-blue-200 font-semibold',
+      user: 'bg-zinc-50 text-zinc-600 border-zinc-200 font-medium'
     };
-    return colors[role] || colors.user;
+    return config[role] || config.user;
   };
 
-  // user.department is already a STRING (not an object), so use it directly
-  const departmentName = user.department?.name || (typeof user.department === "string" ? user.department : null);
-  const hasDepartment = !!departmentName && departmentName.trim() !== '';
+  const departmentName = user.department?.name || (typeof user.department === 'string' ? user.department : null);
+  const initials = user.name
+    ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
+    : 'U';
 
   return (
-    <div className="bg-white rounded-xl p-6 border border-gray-200 hover:shadow-lg transition-all">
-      <div className="flex justify-between items-start mb-4">
-        <div className="flex items-start gap-3">
-          <div className="w-12 h-12 bg-gradient-to-br from-[#911414] to-[#d20001] rounded-full flex items-center justify-center flex-shrink-0">
-            <span className="text-white text-lg font-bold">
-              {user.name?.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) || 'U'}
-            </span>
+    <div className="bg-white rounded-xl border border-zinc-200 shadow-2xs hover:border-zinc-300 p-5 transition-all flex flex-col justify-between font-sans">
+      <div>
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-full bg-zinc-100 border border-zinc-200 text-[#990024] flex items-center justify-center font-bold text-xs shrink-0 font-mono">
+              {initials}
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-sm font-bold text-zinc-900 truncate">
+                {user.name || 'Unnamed User'}
+              </h3>
+              <p className="text-[11px] text-zinc-400 font-mono">@{user.username || 'user'}</p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-lg font-bold text-gray-900">{user.name || 'Unnamed User'}</h3>
-            <span className={`inline-block mt-1 px-2 py-1 text-xs rounded border font-medium ${getRoleBadge(user.role)}`}>
-              {user.role?.toUpperCase() || 'USER'}
-            </span>
+
+          <span className="font-mono text-[9px] uppercase font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0">
+            <Globe className="w-2.5 h-2.5" /> AD_SYNCED
+          </span>
+        </div>
+
+        <div className="space-y-2 text-xs text-zinc-600 mb-4">
+          <div className="flex items-center gap-2">
+            <Mail className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+            <span className="truncate text-zinc-500">{user.email || 'No email registered'}</span>
           </div>
-        </div>
-        <div className="flex gap-2">
-          <button 
-            onClick={() => onEdit(user)}
-            className="p-2 text-[#911414] hover:bg-red-50 rounded-lg transition-colors"
-            title="Edit User"
-          >
-            <Edit className="w-4 h-4" />
-          </button>
-          <button 
-            onClick={() => onDelete(user.id)}
-            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-            title="Delete User"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-      
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          <Mail className="w-4 h-4 text-gray-400" />
-          <span className="truncate">{user.email || 'No email'}</span>
-        </div>
-        
-        <div className="flex items-center gap-2 text-sm">
-          <Building2 className={`w-4 h-4 ${hasDepartment ? 'text-[#911414]' : 'text-gray-400'}`} />
-          {hasDepartment ? (
-            <span className="font-medium text-[#911414]">{departmentName}</span>
-          ) : (
-            <span className="text-gray-500 italic">No department assigned</span>
-          )}
-        </div>
-        
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          <User className="w-4 h-4 text-gray-400" />
-          <span>@{user.username || 'no-username'}</span>
+          <div className="flex items-center gap-2">
+            <Building2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+            {departmentName ? (
+              <span className="font-semibold text-zinc-700 truncate">{departmentName}</span>
+            ) : (
+              <span className="text-zinc-400 italic text-[11px]">Unassigned Directorate</span>
+            )}
+          </div>
         </div>
       </div>
 
-      {user._count?.assignedTickets > 0 && (
-        <div className="mt-4 pt-4 border-t border-gray-100">
-          <p className="text-xs text-gray-500">
-            Claimed <span className="font-semibold text-gray-700">{user._count.assignedTickets}</span> tickets
-          </p>
-        </div>
-      )}
+      <div className="pt-3 border-t border-zinc-100 flex items-center justify-between text-[11px] font-mono">
+        <span className={`px-2 py-0.5 rounded text-[10px] uppercase border ${getRoleBadge(user.role)}`}>
+          {user.role || 'user'}
+        </span>
+
+        {user._count?.assignedTickets > 0 && (
+          <span className="text-zinc-500 text-[10px] font-medium flex items-center gap-1">
+            <Ticket className="w-3 h-3 text-zinc-400" />
+            {user._count.assignedTickets} claimed
+          </span>
+        )}
+      </div>
     </div>
   );
 };

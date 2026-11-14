@@ -1,32 +1,25 @@
 const { PrismaClient } = require('@prisma/client');
 const { sendEmail, sendTicketReply } = require('../services/emailService');
+const { createTicketNotification } = require('../services/notificationService');
 const { auditLog } = require('../middleware/security');
+const {
+  ACTIVE_TICKET_STATUSES,
+  VALID_TICKET_STATUSES,
+  isValidTicketStatusTransition
+} = require('../services/ticketStatus');
+const {
+  getConfiguredTicketSlaDeadlines,
+  getActiveOverdueDeadline,
+  getTicketSlaChecks,
+  isActiveTicketOverdue
+} = require('../services/slaService');
 const prisma = new PrismaClient();
-
-const VALID_PRIORITIES = new Set(['Low', 'Medium', 'High', 'Critical']);
-const VALID_STATUSES = new Set(['Open', 'In Progress', 'Resolved', 'Closed']);
-const ACTIVE_STATUSES = new Set(['Open', 'In Progress']);
-
-function getDefaultResolutionMinutes(priority) {
-  const defaults = {
-    Critical: 4 * 60,
-    High: 8 * 60,
-    Medium: 24 * 60,
-    Low: 72 * 60
-  };
-  return defaults[priority] || defaults.Medium;
-}
-
-function getSlaDueAt(createdAt, priority, slaPolicy) {
-  const resolutionMinutes = slaPolicy?.resolutionMinutes || getDefaultResolutionMinutes(priority);
-  return new Date(new Date(createdAt).getTime() + resolutionMinutes * 60 * 1000);
-}
+const VALID_PRIORITIES = new Set(['Very High', 'High', 'Medium', 'Low', 'Very Low', 'Critical']);
 
 function decorateTicket(ticket) {
   if (!ticket) return ticket;
-  const isActive = ACTIVE_STATUSES.has(ticket.status);
-  const dueAt = ticket.slaDueAt ? new Date(ticket.slaDueAt) : null;
-  const isOverdue = Boolean(isActive && dueAt && new Date() > dueAt);
+  const isOverdue = isActiveTicketOverdue(ticket);
+  const dueAt = getActiveOverdueDeadline(ticket);
   return {
     ...ticket,
     isOverdue,
@@ -68,24 +61,6 @@ async function generateTicketNumber() {
   // Use dynamic prefix from settings
   const prefix = settings ? settings.ticketNumberPrefix : 'TICK';
   return `${prefix}-${dateStr}-${String(count + 1).padStart(4, '0')}`;
-}
-
-async function findMatchingSlaPolicy({ priority, category, departmentId }) {
-  return prisma.slaPolicy.findFirst({
-    where: {
-      isActive: true,
-      AND: [
-        { OR: [{ priority }, { priority: null }] },
-        { OR: [{ category }, { category: null }] },
-        { OR: [{ departmentId }, { departmentId: null }] }
-      ]
-    },
-    orderBy: [
-      { departmentId: 'desc' },
-      { category: 'desc' },
-      { priority: 'desc' }
-    ]
-  });
 }
 
 exports.createTicket = async (req, res) => {
@@ -147,12 +122,8 @@ exports.createTicket = async (req, res) => {
     const ticketNumber = await generateTicketNumber();
     const resolvedPriority = priority || (settings ? settings.defaultPriority : 'Medium');
     const resolvedCategory = category || (settings ? settings.defaultCategory : 'General Issues');
-    const slaPolicy = await findMatchingSlaPolicy({
-      priority: resolvedPriority,
-      category: resolvedCategory,
-      departmentId: resolvedDepartmentId
-    });
-    const slaDueAt = getSlaDueAt(new Date(), resolvedPriority, slaPolicy);
+    const createdAt = new Date();
+    const slaDeadlines = await getConfiguredTicketSlaDeadlines(prisma, resolvedCategory, resolvedPriority, createdAt);
     const ticket = await prisma.ticket.create({
       data: {
         ticketNumber,
@@ -165,8 +136,13 @@ exports.createTicket = async (req, res) => {
         status: settings ? (settings.defaultStatus || 'Open') : 'Open',
         departmentId: resolvedDepartmentId,
         createdById: createdById,
-        slaDueAt,
-        slaBreached: new Date() > slaDueAt
+        createdAt,
+        responseDueAt: slaDeadlines.responseDueAt,
+        slaDueAt: slaDeadlines.slaDueAt,
+        slaEscalationAt: slaDeadlines.slaEscalationAt,
+        slaResponseTargetPercent: slaDeadlines.slaResponseTargetPercent,
+        slaResolutionTargetPercent: slaDeadlines.slaResolutionTargetPercent,
+        slaBreached: false
       },
       include: { department: true, assignedTo: true, createdBy: true }
     });
@@ -185,7 +161,18 @@ exports.createTicket = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: 'Ticket created successfully',
-      ticket: { id: ticket.id, ticketNumber: ticket.ticketNumber, subject: ticket.subject, status: ticket.status, priority: ticket.priority, category: ticket.category, createdAt: ticket.createdAt, slaDueAt: ticket.slaDueAt }
+      ticket: {
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        subject: ticket.subject,
+        status: ticket.status,
+        priority: ticket.priority,
+        category: ticket.category,
+        createdAt: ticket.createdAt,
+        responseDueAt: ticket.responseDueAt,
+        slaDueAt: ticket.slaDueAt,
+        slaEscalationAt: ticket.slaEscalationAt
+      }
     });
   } catch (error) {
     console.error('Error creating ticket:', { requestId: req.id, message: error.message });
@@ -227,7 +214,7 @@ exports.updateTicket = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, priority, assignedToId, departmentId, category, resolution } = req.body;
-    if (status && !VALID_STATUSES.has(status)) {
+    if (status && !VALID_TICKET_STATUSES.has(status)) {
       return res.status(400).json({ success: false, message: 'Invalid ticket status' });
     }
     if (priority && !VALID_PRIORITIES.has(priority)) {
@@ -238,16 +225,24 @@ exports.updateTicket = async (req, res) => {
     if (!existing) {
       return res.status(404).json({ success: false, message: 'Ticket not found' });
     }
+    if (status && !isValidTicketStatusTransition(existing.status, status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot change ticket status from ${existing.status} to ${status}`
+      });
+    }
     const updateData = {};
     const historyEntries = [];
     if (status && status !== existing.status) {
       updateData.status = status;
       historyEntries.push({ field: 'status', oldValue: existing.status, newValue: status });
-      if (status === 'In Progress' && !existing.responseTime) {
-        updateData.responseTime = Math.floor((new Date() - new Date(existing.createdAt)) / 60000);
-      }
       if ((status === 'Resolved' || status === 'Closed') && !existing.resolutionTime) {
-        updateData.resolutionTime = Math.floor((new Date() - new Date(existing.createdAt)) / 60000);
+        const resolvedAt = new Date();
+        updateData.resolutionTime = Math.floor((resolvedAt - new Date(existing.createdAt)) / 60000);
+        if (!existing.firstRespondedAt) {
+          updateData.firstRespondedAt = resolvedAt;
+          updateData.responseTime = updateData.resolutionTime;
+        }
       }
       if (status === 'Resolved') {
         updateData.resolvedAt = new Date();
@@ -280,9 +275,6 @@ exports.updateTicket = async (req, res) => {
       if (assignedToId && existing.status === 'Open' && status === undefined) {
         updateData.status = 'In Progress';
         historyEntries.push({ field: 'status', oldValue: existing.status, newValue: 'In Progress' });
-        if (!existing.responseTime) {
-          updateData.responseTime = Math.floor((new Date() - new Date(existing.createdAt)) / 60000);
-        }
       }
     }
     if (departmentId && departmentId !== existing.departmentId) {
@@ -297,25 +289,28 @@ exports.updateTicket = async (req, res) => {
       historyEntries.push({ field: 'department', oldValue: existing.departmentId, newValue: departmentId });
     }
     if (category) updateData.category = category;
-    if ((priority && priority !== existing.priority) || (category && category !== existing.category) || (departmentId && departmentId !== existing.departmentId)) {
-      const slaPolicy = await findMatchingSlaPolicy({
-        priority: updateData.priority || existing.priority,
-        category: updateData.category || existing.category,
-        departmentId: updateData.departmentId || existing.departmentId
-      });
-      if (!['Resolved', 'Closed'].includes(updateData.status || existing.status)) {
-        updateData.slaDueAt = getSlaDueAt(existing.createdAt, updateData.priority || existing.priority, slaPolicy);
-      }
-    }
     if ((updateData.status || status) === 'Open') {
       updateData.assignedToId = null;
       if (existing.assignedToId) {
         historyEntries.push({ field: 'assignedTo', oldValue: existing.assignedToId, newValue: '' });
       }
     }
-    if (updateData.slaDueAt || existing.slaDueAt) {
-      const dueAt = updateData.slaDueAt || existing.slaDueAt;
-      updateData.slaBreached = !['Resolved', 'Closed'].includes(updateData.status || existing.status) && new Date() > new Date(dueAt);
+    if (existing.slaDueAt || existing.responseDueAt) {
+      const currentTime = new Date();
+      const nextStatus = updateData.status || existing.status;
+      const firstRespondedAt = updateData.firstRespondedAt || existing.firstRespondedAt;
+      const responseBreached = existing.responseDueAt && (
+        firstRespondedAt
+          ? new Date(firstRespondedAt) > new Date(existing.responseDueAt)
+          : currentTime > new Date(existing.responseDueAt)
+      );
+      const resolvedAt = updateData.resolvedAt || existing.resolvedAt || (nextStatus === 'Closed' ? updateData.closedAt : null);
+      const resolutionBreached = existing.slaDueAt && (
+        resolvedAt
+          ? new Date(resolvedAt) > new Date(existing.slaDueAt)
+          : ACTIVE_TICKET_STATUSES.has(nextStatus) && currentTime > new Date(existing.slaDueAt)
+      );
+      updateData.slaBreached = Boolean(responseBreached || resolutionBreached);
     }
     // resolution field not in schema, skipping
     const ticket = await prisma.ticket.update({
@@ -342,6 +337,39 @@ exports.updateTicket = async (req, res) => {
         ...ticket,
         emailMessageId: existing.emailMessageId,
         comment: `Your ticket has been claimed by ${ticket.assignedTo?.name || 'a support agent'}.`
+      });
+    }
+
+    const notificationRecipients = new Set();
+    if (ticket.status !== existing.status) {
+      if (existing.createdById) notificationRecipients.add(existing.createdById);
+      const newlyAssignedTo = assignedToId !== undefined && assignedToId !== existing.assignedToId
+        ? assignedToId
+        : null;
+      if (newlyAssignedTo) notificationRecipients.delete(newlyAssignedTo);
+      if (ticket.assignedToId && ticket.assignedToId !== newlyAssignedTo) {
+        notificationRecipients.add(ticket.assignedToId);
+      }
+      await Promise.all([...notificationRecipients]
+        .filter(recipientId => recipientId !== userId)
+        .map(recipientId => createTicketNotification({
+          userId: recipientId,
+          ticket,
+          type: 'status_change',
+          title: 'Ticket status updated',
+          message: `${ticket.ticketNumber}: status changed from ${existing.status} to ${ticket.status}`,
+          emailPreference: 'emailOnStatusChange'
+        })));
+    }
+
+    if (assignedToId && assignedToId !== existing.assignedToId && assignedToId !== userId) {
+      await createTicketNotification({
+        userId: assignedToId,
+        ticket,
+        type: 'assignment',
+        title: 'Ticket assigned to you',
+        message: `${ticket.ticketNumber}: ${ticket.subject}`,
+        emailPreference: 'emailOnAssignment'
       });
     }
     return res.json({ success: true, ticket: decorateTicket(ticket) });
@@ -379,8 +407,7 @@ exports.escalateTicket = async (req, res) => {
 
     const updateData = {
       assignedToId: targetUser.id,
-      status: ticket.status === 'Open' ? 'In Progress' : ticket.status,
-      responseTime: ticket.responseTime || Math.floor((new Date() - new Date(ticket.createdAt)) / 60000)
+      status: ticket.status === 'Open' ? 'In Progress' : ticket.status
     };
 
     const updated = await prisma.ticket.update({
@@ -408,6 +435,17 @@ exports.escalateTicket = async (req, res) => {
       }
     });
 
+    if (targetUser.id !== userId) {
+      await createTicketNotification({
+        userId: targetUser.id,
+        ticket: updated,
+        type: 'escalation',
+        title: 'Ticket escalated to you',
+        message: `${updated.ticketNumber}: ${updated.subject}${safeReason ? ` - ${safeReason}` : ''}`,
+        emailPreference: 'escalationAlerts'
+      });
+    }
+
     return res.json({ success: true, message: 'Ticket escalated successfully', ticket: decorateTicket(updated) });
   } catch (error) {
     console.error('Error escalating ticket:', error);
@@ -424,7 +462,25 @@ exports.addComment = async (req, res) => {
     if (!safeContent) {
       return res.status(400).json({ success: false, message: 'Comment content is required' });
     }
-    const existingTicket = await prisma.ticket.findUnique({ where: { id }, select: { id: true } });
+    const existingTicket = await prisma.ticket.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        ticketNumber: true,
+        subject: true,
+        assignedToId: true,
+        createdById: true,
+        createdAt: true,
+        responseTime: true,
+        firstRespondedAt: true,
+        responseDueAt: true,
+        slaDueAt: true,
+        slaBreached: true,
+        status: true,
+        resolvedAt: true,
+        closedAt: true
+      }
+    });
     if (!existingTicket) {
       return res.status(404).json({ success: false, message: 'Ticket not found' });
     }
@@ -432,6 +488,20 @@ exports.addComment = async (req, res) => {
       data: { ticketId: id, userId: userId, content: safeContent, isInternal: isInternal || false },
       include: { user: { select: { id: true, name: true, email: true, role: true } } }
     });
+    if (!comment.isInternal && ['staff', 'admin'].includes(comment.user?.role) && !existingTicket.firstRespondedAt) {
+      const respondedAt = comment.createdAt || new Date();
+      await prisma.ticket.update({
+        where: { id },
+        data: {
+          firstRespondedAt: respondedAt,
+          slaBreached: existingTicket.slaBreached || getTicketSlaChecks({
+            ...existingTicket,
+            firstRespondedAt: respondedAt
+          }, respondedAt).some(check => !check),
+          responseTime: Math.floor((respondedAt - new Date(existingTicket.createdAt)) / 60000)
+        }
+      });
+    }
     const ticket = await prisma.ticket.findUnique({
       where: { id },
       include: { assignedTo: { select: { id: true, name: true, email: true } } }
@@ -445,6 +515,20 @@ exports.addComment = async (req, res) => {
         });
       }
     }
+
+    const recipients = new Set([existingTicket.assignedToId, existingTicket.createdById].filter(Boolean));
+    const commentAuthorName = comment.user?.name || 'Someone';
+    await Promise.all([...recipients]
+      .filter(recipientId => recipientId !== userId)
+      .map(recipientId => createTicketNotification({
+        userId: recipientId,
+        ticket: existingTicket,
+        type: 'comment',
+        title: 'New ticket comment',
+        message: `${commentAuthorName} commented on ${existingTicket.ticketNumber}: ${safeContent.slice(0, 180)}`,
+        emailPreference: 'emailOnNewComment'
+      })));
+
     return res.status(201).json({ success: true, comment });
   } catch (error) {
     console.error('Error adding comment:', error);
@@ -491,14 +575,23 @@ exports.addAttachment = async (req, res) => {
 
 exports.getStatistics = async (req, res) => {
   try {
-    const [total, open, inProgress, resolved, closed, critical, overdue] = await Promise.all([
+    const [total, open, inProgress, resolved, closed, onHold, critical, overdue] = await Promise.all([
       prisma.ticket.count(),
       prisma.ticket.count({ where: { status: 'Open' } }),
       prisma.ticket.count({ where: { status: 'In Progress' } }),
       prisma.ticket.count({ where: { status: 'Resolved' } }),
       prisma.ticket.count({ where: { status: 'Closed' } }),
+      prisma.ticket.count({ where: { status: 'On Hold' } }),
       prisma.ticket.count({ where: { priority: 'Critical', status: { notIn: ['Resolved', 'Closed'] } } }),
-      prisma.ticket.count({ where: { status: { in: ['Open', 'In Progress'] }, slaDueAt: { lt: new Date() } } })
+      prisma.ticket.count({
+        where: {
+          status: { in: [...ACTIVE_TICKET_STATUSES] },
+          OR: [
+            { slaDueAt: { lt: new Date() }, resolvedAt: null },
+            { responseDueAt: { lt: new Date() }, firstRespondedAt: null }
+          ]
+        }
+      })
     ]);
     return res.json({
       success: true,
@@ -508,12 +601,14 @@ exports.getStatistics = async (req, res) => {
         inProgress,
         resolved,
         closed,
+        onHold,
         critical,
         totalTickets: total,
         openTickets: open,
         inProgressTickets: inProgress,
         resolvedTickets: resolved,
         closedTickets: closed,
+        onHoldTickets: onHold,
         criticalTickets: critical,
         overdueTickets: overdue,
         assignedTickets: await prisma.ticket.count({ where: { assignedToId: { not: null } } })

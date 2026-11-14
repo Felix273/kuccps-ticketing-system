@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { settingsService } from '../../services/settingsService';
 import { toast } from 'react-hot-toast';
+import { PRIORITY_LEVELS, normalizePriority } from '../../utils/constants';
 
 const TicketSettings = () => {
   const [settings, setSettings] = useState({});
@@ -84,15 +85,12 @@ const TicketSettings = () => {
           <div>
             <label className="block text-sm font-medium mb-1">Default Priority</label>
             <select
-              value={settings.defaultPriority || 'Medium'}
+              value={normalizePriority(settings.defaultPriority || 'Medium')}
               onChange={(e) => setSettings(prev => ({...prev, defaultPriority: e.target.value}))}
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
               disabled={saving}
             >
-              <option value="Low">Low</option>
-              <option value="Medium">Medium</option>
-              <option value="High">High</option>
-              <option value="Critical">Critical</option>
+              {PRIORITY_LEVELS.map(priority => <option key={priority} value={priority}>{priority}</option>)}
             </select>
           </div>
           <div>

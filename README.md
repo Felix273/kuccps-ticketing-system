@@ -322,6 +322,8 @@ Defined in `backend/src/routes/operations.js`.
 | POST | `/sla-policies` | Admin | Create an SLA policy |
 | PUT | `/sla-policies/:id` | Admin | Update an SLA policy |
 | POST | `/csat` | JWT | Submit a CSAT response |
+| GET | `/csat/public?token=...` | Public | Validate a feedback link from a resolved-ticket email |
+| POST | `/csat/public` | Public | Submit feedback from a feedback link |
 
 ### Notifications: `/api/notifications`
 
@@ -530,6 +532,8 @@ Production notes:
 
 - `JWT_SECRET` should be at least 32 characters.
 - `PUBLIC_TICKET_API_KEY` should be at least 32 characters.
+- Set backend `PUBLIC_APP_URL` to the public frontend URL so CSAT email links open the deployed app, not localhost.
+- For local testing only, set `PUBLIC_APP_URL=http://localhost:5173` explicitly.
 - `NODE_ENV=production` enables stricter validation in `backend/src/middleware/security.js`.
 - Production frontend URLs should use HTTPS.
 - Do not use wildcard CORS origins in production.

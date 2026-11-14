@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, AlertCircle, Clock, CheckCircle, UserX, Zap } from 'lucide-react';
+import { User, AlertCircle, Clock, CheckCircle, UserX, Zap, PauseCircle } from 'lucide-react';
 
 export const QuickFilters = ({ onFilterSelect, activeFilter, currentUser }) => {
   const quickFilters = [
@@ -21,11 +21,11 @@ export const QuickFilters = ({ onFilterSelect, activeFilter, currentUser }) => {
     },
     {
       id: 'critical',
-      label: 'Critical',
+      label: 'Very High',
       icon: <Zap className="w-4 h-4" />,
       color: 'bg-red-100 text-red-700 border-red-300 hover:bg-red-200',
       activeColor: 'bg-red-600 text-white border-red-600',
-      filter: { priority: 'Critical' }
+      filter: { priority: 'Very High' }
     },
     {
       id: 'open',
@@ -42,6 +42,14 @@ export const QuickFilters = ({ onFilterSelect, activeFilter, currentUser }) => {
       color: 'bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-200',
       activeColor: 'bg-purple-600 text-white border-purple-600',
       filter: { status: 'In Progress' }
+    },
+    {
+      id: 'on-hold',
+      label: 'On Hold',
+      icon: <PauseCircle className="w-4 h-4" />,
+      color: 'bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200',
+      activeColor: 'bg-amber-600 text-white border-amber-600',
+      filter: { status: 'On Hold' }
     },
     {
       id: 'resolved',

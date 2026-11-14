@@ -1,118 +1,197 @@
 import React from 'react';
-import { Mail, Calendar, User, Hand, AlertCircle, Clock, CheckCircle, Eye } from 'lucide-react';
+import { 
+  Mail, 
+  Calendar, 
+  User, 
+  Clock, 
+  CheckCircle2, 
+  AlertCircle, 
+  ChevronRight, 
+  ArrowRightLeft,
+  Hand
+} from 'lucide-react';
+import { normalizePriority } from '../../utils/constants';
 
 export const TicketCard = ({ ticket, onClaim, onViewDetails, currentUser }) => {
-  const getPriorityColor = (priority) => {
-    const colors = {
-      Low: 'bg-green-100 text-green-700 border-green-200',
-      Medium: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-      High: 'bg-orange-100 text-orange-700 border-orange-200',
-      Critical: 'bg-red-100 text-red-700 border-red-200'
-    };
-    return colors[priority] || colors.Medium;
-  };
+  const isClaimedByMe = ticket.assignedToId === currentUser?.id;
+  const isUnclaimed = !ticket.assignedToId;
 
-  const getStatusIcon = (status) => {
+  // Linear / getdesign.md Precision Status Dot
+  const renderStatus = (status) => {
     switch (status) {
       case 'Open':
-        return <AlertCircle className="w-4 h-4" />;
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-blue-700 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+            Open
+          </span>
+        );
       case 'In Progress':
-        return <Clock className="w-4 h-4" />;
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-amber-700 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+            In Progress
+          </span>
+        );
+      case 'On Hold':
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-orange-700 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
+            On Hold
+          </span>
+        );
       case 'Resolved':
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-emerald-700 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+            Resolved
+          </span>
+        );
       case 'Closed':
-        return <CheckCircle className="w-4 h-4" />;
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-zinc-500 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-zinc-400"></span>
+            Closed
+          </span>
+        );
       default:
-        return <AlertCircle className="w-4 h-4" />;
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-zinc-500">
+            <span className="w-1.5 h-1.5 rounded-full bg-zinc-400"></span>
+            {status || 'Normal'}
+          </span>
+        );
     }
   };
 
-  const getStatusColor = (status) => {
-    const colors = {
-      Open: 'bg-blue-100 text-blue-700',
-      'In Progress': 'bg-purple-100 text-purple-700',
-      Resolved: 'bg-green-100 text-green-700',
-      Closed: 'bg-gray-100 text-gray-700'
-    };
-    return colors[status] || colors.Open;
+  // Linear Priority Dot
+  const renderPriority = (priority) => {
+    const displayPriority = normalizePriority(priority);
+    switch (displayPriority) {
+      case 'Critical':
+      case 'Very High':
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-rose-700 font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-pulse"></span>
+            {displayPriority}
+          </span>
+        );
+      case 'High':
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-amber-700 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+            High
+          </span>
+        );
+      default:
+        return (
+          <span className="flex items-center gap-1.5 font-mono text-[11px] text-zinc-500">
+            <span className="w-1.5 h-1.5 rounded-full bg-zinc-400"></span>
+            {displayPriority || 'Medium'}
+          </span>
+        );
+    }
   };
 
+  const initials = ticket.assignedTo?.name
+    ? ticket.assignedTo.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
+    : null;
+
   return (
-    <div className="bg-white border-2 border-gray-200 rounded-xl p-6 hover:border-[#911414] hover:shadow-xl transition-all">
-      <div className="flex justify-between items-start mb-4">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
-            <span className="text-sm font-mono text-gray-500 bg-gray-100 px-2 py-1 rounded">
-              {ticket.ticketNumber}
-            </span>
-            <span className={`px-2 py-1 text-xs rounded border font-medium ${getPriorityColor(ticket.priority)}`}>
-              {ticket.priority}
-            </span>
-            <span className={`px-2 py-1 text-xs rounded font-medium flex items-center gap-1 ${getStatusColor(ticket.status)}`}>
-              {getStatusIcon(ticket.status)}
-              {ticket.status}
+    <div 
+      onClick={onViewDetails}
+      className="bg-white border border-zinc-200 rounded-lg p-4 hover:border-zinc-300 hover:shadow-xs transition-all flex flex-col justify-between space-y-3 font-sans cursor-pointer group"
+    >
+      <div>
+        {/* 1. Header: Identifier + Linear Dots */}
+        <div className="flex items-center justify-between gap-2 mb-2 font-mono">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-zinc-500 group-hover:text-zinc-900 transition-colors">
+              #{ticket.ticketNumber}
             </span>
             {ticket.emailMessageId && (
-              <span className="px-2 py-1 text-xs rounded bg-blue-100 text-blue-700 border border-blue-200 flex items-center gap-1">
-                <Mail className="w-3 h-3" />
-                From Email
+              <span title="Created via inbound email">
+                <Mail className="w-3 h-3 text-zinc-400" />
               </span>
             )}
+          </div>
+
+          <div className="flex items-center gap-2.5">
             {ticket.isOverdue && (
-              <span className="px-2 py-1 text-xs rounded bg-red-100 text-red-700 border border-red-200 flex items-center gap-1 font-semibold">
-                <Clock className="w-3 h-3" />
+              <span className="text-[9px] uppercase font-bold text-rose-700 bg-rose-50 px-1 py-0.2 border border-rose-200">
                 Overdue
               </span>
             )}
+            {renderPriority(ticket.priority)}
+            {renderStatus(ticket.status)}
           </div>
-          <h3 className="text-lg font-bold text-gray-900 mb-2 break-words">{ticket.subject}</h3>
-          <p className="text-sm text-gray-600 line-clamp-2 break-words overflow-hidden">{ticket.description}</p>
+        </div>
+
+        {/* 2. Subject & Description */}
+        <h3 className="text-sm font-bold text-zinc-900 group-hover:text-[#990024] transition-colors leading-snug line-clamp-1">
+          {ticket.subject}
+        </h3>
+        <p className="text-xs text-zinc-500 line-clamp-2 mt-1 leading-relaxed">
+          {ticket.description || 'No additional details provided.'}
+        </p>
+
+        {/* 3. Clean Metadata Row (No Clipping) */}
+        <div className="flex items-center justify-between pt-3 mt-3 border-t border-zinc-100 text-[11px] font-mono text-zinc-400">
+          <span className="truncate max-w-[170px]">{ticket.requesterEmail}</span>
+          <span className="tabular-nums">
+            {new Date(ticket.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+          </span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        <div className="flex items-center gap-2 text-sm text-gray-600 min-w-0">
-          <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
-          <span className="truncate">{ticket.requesterEmail}</span>
-        </div>
-        
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          <Calendar className="w-4 h-4 text-gray-400 flex-shrink-0" />
-          <span>{new Date(ticket.createdAt).toLocaleDateString()}</span>
-        </div>
-
-        <div className="flex items-center gap-2 text-sm min-w-0">
-          <User className="w-4 h-4 text-gray-400 flex-shrink-0" />
+      {/* 4. Footer: Assignee & Action Buttons */}
+      <div 
+        className="pt-2.5 border-t border-zinc-100 flex items-center justify-between text-xs"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Assignee Info */}
+        <div className="min-w-0 flex items-center gap-1.5 font-mono text-[11px]">
           {ticket.assignedTo ? (
-            <span className="font-medium text-[#911414] truncate">{ticket.assignedTo.name}</span>
+            <div className="flex items-center gap-1.5 truncate">
+              <span className="w-4 h-4 rounded-full bg-zinc-100 text-zinc-700 font-bold text-[8px] flex items-center justify-center border border-zinc-200 shrink-0">
+                {initials}
+              </span>
+              <span className="text-zinc-700 font-medium truncate max-w-[110px]">
+                {ticket.assignedTo.name}
+              </span>
+            </div>
           ) : (
-            <span className="text-gray-400 italic">Unclaimed</span>
+            <span className="text-zinc-400 italic text-[11px]">Unassigned</span>
           )}
         </div>
 
-        {ticket.department && (
-          <div className="flex items-center gap-2 text-sm text-gray-600 min-w-0">
-            <span className="font-medium truncate">{ticket.department.name}</span>
-          </div>
-        )}
+        {/* Action Button */}
+        <div className="flex items-center gap-1.5 shrink-0 font-mono">
+          {onClaim && !isClaimedByMe && (
+            <button
+              onClick={onClaim}
+              className="px-2 py-0.5 text-[10px] font-semibold border border-zinc-200 rounded text-zinc-700 hover:text-[#990024] hover:border-[#990024] bg-white transition-colors cursor-pointer"
+            >
+              {isUnclaimed ? '+ Claim' : 'Transfer'}
+            </button>
+          )}
+
+          {isClaimedByMe && (
+            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+              Claimed
+            </span>
+          )}
+
+          <button
+            onClick={onViewDetails}
+            className="p-1 text-zinc-400 hover:text-zinc-800 transition-colors cursor-pointer"
+            title="View Details"
+          >
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
-      <div className="flex gap-2">
-        <button
-          onClick={onViewDetails}
-          className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-all flex items-center justify-center gap-2 border border-gray-300"
-        >
-          <Eye className="w-4 h-4" />
-          View Details
-        </button>
-        <button
-          onClick={onClaim}
-          disabled={ticket.assignedToId === currentUser?.id}
-          className="flex-1 px-4 py-2 bg-gradient-to-r from-[#911414] to-[#d20001] text-white rounded-lg hover:from-[#ac0807] hover:to-[#911414] font-medium transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          <Hand className="w-4 h-4" />
-          {ticket.assignedToId === currentUser?.id ? 'Claimed' : ticket.assignedTo ? 'Transfer Claim' : 'Claim'}
-        </button>
-      </div>
     </div>
   );
 };

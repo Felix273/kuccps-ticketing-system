@@ -1,9 +1,10 @@
 // src/components/tickets/TicketRow.jsx
 import React from 'react';
-import { PRIORITY_CONFIG, STATUS_CONFIG } from '../../utils/constants';
+import { PRIORITY_CONFIG, STATUS_CONFIG, normalizePriority } from '../../utils/constants';
 
 export const TicketRow = ({ ticket, onClick }) => {
-  const pConfig = PRIORITY_CONFIG[ticket.priority] || { 
+  const priority = normalizePriority(ticket.priority);
+  const pConfig = PRIORITY_CONFIG[priority] || { 
     bg: 'bg-gray-50', text: 'text-gray-700', border: 'border-gray-200' 
   };
   const sConfig = STATUS_CONFIG[ticket.status] || { 
@@ -32,7 +33,7 @@ export const TicketRow = ({ ticket, onClick }) => {
       </td>
       <td className="px-6 py-4">
         <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ${pConfig.bg} ${pConfig.text} ${pConfig.border}`}>
-          {ticket.priority || 'N/A'}
+          {priority || 'N/A'}
         </span>
       </td>
       <td className="px-6 py-4">

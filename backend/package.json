@@ -5,6 +5,8 @@
   "scripts": {
     "test": "node --test",
     "preflight": "node scripts/preflight.js",
+    "seed:knowledgebase": "node scripts/seed-knowledgebase.js",
+    "seed:sla": "node scripts/seed-sla.js",
     "start": "node src/server.js"
   },
   "prisma": {
@@ -20,6 +22,7 @@
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "csv-parser": "^3.2.0",
+    "date-holidays": "3.26.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "express-validator": "^7.3.1",
