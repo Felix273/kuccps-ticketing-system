@@ -1,3 +1,42 @@
+enum Role {
+  user
+  staff
+  admin
+}
+
+enum TicketStatus {
+  Open
+  InProgress
+  Resolved
+  Closed
+}
+
+enum TicketPriority {
+  Low
+  Medium
+  High
+  Critical
+}
+
+enum StatusIssueStatus {
+  Investigating
+  Identified
+  Monitoring
+  Resolved
+}
+
+enum Severity {
+  Informational
+  Warning
+  Error
+}
+
+enum Visibility {
+  private
+  shared
+  global
+}
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -15,7 +54,7 @@ model User {
   password       String
   departmentId   String?
   department     Department? @relation(fields: [departmentId], references: [id])
-  role           String      @default("staff")
+  role           Role        @default(staff)
   ldapSync       Boolean     @default(false)
   ldapDn         String?
   ldapObjectGuid String?
@@ -55,8 +94,8 @@ model Ticket {
   description  String  @db.Text
   emailContent String? @db.Text
   category     String
-  priority     String  @default("Medium")
-  status       String  @default("Open")
+  priority     TicketPriority  @default(Medium)
+  status       TicketStatus    @default(Open)
 
   requesterEmail String
   requesterName  String?
@@ -254,7 +293,7 @@ model SavedView {
   columns    Json?
   sortBy     String?
   sortOrder  String   @default("desc")
-  visibility String   @default("private")
+  visibility Visibility @default(private)
   role       String?
   ownerId    String?
   owner      User?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
@@ -270,8 +309,8 @@ model StatusIssue {
   id          String              @id @default(uuid())
   title       String
   description String              @db.Text
-  status      String              @default("Investigating")
-  severity    String              @default("Informational")
+  status      StatusIssueStatus @default(Investigating)
+  severity    Severity          @default(Informational)
   isPublic    Boolean             @default(true)
   startedAt   DateTime            @default(now())
   resolvedAt  DateTime?
@@ -513,7 +552,7 @@ model KnowledgeArticle {
   excerpt  String?
   content  String  @db.Text
   category String
-  status   String  @default("published") // draft, pending_review, published, archived
+  status   String  @default("published")
 
   // Structured ICT Troubleshooting Fields
   symptoms        String? @db.Text
