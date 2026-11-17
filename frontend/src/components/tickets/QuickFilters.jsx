@@ -25,7 +25,7 @@ export const QuickFilters = ({ onFilterSelect, activeFilter, currentUser }) => {
       icon: <Zap className="w-4 h-4" />,
       color: 'bg-red-100 text-red-700 border-red-300 hover:bg-red-200',
       activeColor: 'bg-red-600 text-white border-red-600',
-      filter: { priority: 'Very High' }
+      filter: { priority: 'VeryHigh' }
     },
     {
       id: 'open',
@@ -41,7 +41,7 @@ export const QuickFilters = ({ onFilterSelect, activeFilter, currentUser }) => {
       icon: <Clock className="w-4 h-4" />,
       color: 'bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-200',
       activeColor: 'bg-purple-600 text-white border-purple-600',
-      filter: { status: 'In Progress' }
+      filter: { status: 'InProgress' }
     },
     {
       id: 'on-hold',
@@ -49,7 +49,7 @@ export const QuickFilters = ({ onFilterSelect, activeFilter, currentUser }) => {
       icon: <PauseCircle className="w-4 h-4" />,
       color: 'bg-amber-100 text-amber-700 border-amber-300 hover:bg-amber-200',
       activeColor: 'bg-amber-600 text-white border-amber-600',
-      filter: { status: 'On Hold' }
+      filter: { status: 'OnHold' }
     },
     {
       id: 'resolved',

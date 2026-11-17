@@ -48,7 +48,7 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
   const stats = useMemo(() => {
     const totalDepts = departments.length;
     const staffAssigned = users.filter(u => u.departmentId || u.department).length;
-    const activeTickets = tickets.filter(t => ['Open', 'In Progress', 'On Hold'].includes(t.status)).length;
+    const activeTickets = tickets.filter(t => ['Open', 'InProgress', 'OnHold'].includes(t.status)).length;
     return { totalDepts, staffAssigned, activeTickets };
   }, [departments, users, tickets]);
 

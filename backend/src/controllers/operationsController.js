@@ -15,7 +15,7 @@ const {
 } = require('../services/slaService');
 const prisma = require('../lib/prisma');
 
-const OPEN_STATUSES = new Set(['Open', 'In Progress', 'On Hold']);
+const OPEN_STATUSES = new Set(['Open', 'InProgress', 'OnHold']);
 const RESOLVED_STATUSES = new Set(['Resolved', 'Closed']);
 
 function hoursBetween(start, end = new Date()) {
@@ -58,7 +58,7 @@ function buildAiInsights(tickets, users) {
   const now = new Date();
   const activeTickets = tickets.filter(ticket => OPEN_STATUSES.has(ticket.status));
   const resolvedTickets = tickets.filter(ticket => RESOLVED_STATUSES.has(ticket.status));
-  const highPriorityActive = activeTickets.filter(ticket => ['High', 'Very High', 'Critical'].includes(ticket.priority));
+  const highPriorityActive = activeTickets.filter(ticket => ['High', 'VeryHigh', 'Critical'].includes(ticket.priority));
   const overdueTickets = activeTickets.filter(ticket => isActiveTicketOverdue(ticket, now));
   const dueSoonTickets = activeTickets.filter(ticket => {
     const dueAt = getNextSlaDeadline(ticket);
@@ -100,7 +100,7 @@ function buildAiInsights(tickets, users) {
         };
       }
       workloadByAgent[agentName].active += 1;
-      if (['High', 'Very High', 'Critical'].includes(ticket.priority)) workloadByAgent[agentName].highPriority += 1;
+      if (['High', 'VeryHigh', 'Critical'].includes(ticket.priority)) workloadByAgent[agentName].highPriority += 1;
       if (isActiveTicketOverdue(ticket, now)) workloadByAgent[agentName].overdue += 1;
     }
 
@@ -198,7 +198,7 @@ function buildAiInsights(tickets, users) {
     ...overdueTickets.slice(0, 4).map(ticket => ({
       ticketNumber: ticket.ticketNumber,
       reason: `Overdue by ${hoursBetween(getActiveOverdueDeadline(ticket, now), now)} hour(s).`,
-      recommendation: ['Critical', 'Very High'].includes(ticket.priority)
+      recommendation: ['Critical', 'VeryHigh'].includes(ticket.priority)
         ? 'Escalate vertically to a senior officer and post an internal update.'
         : 'Escalate horizontally to a peer with capacity or notify the department lead.'
     })),
@@ -232,7 +232,7 @@ function buildAiInsights(tickets, users) {
       dueSoon: dueSoonTickets.length,
       highPriorityActive: highPriorityActive.length,
       highestRiskTickets: activeTickets
-        .filter(ticket => ticket.slaDueAt || ticket.responseDueAt || ['High', 'Very High', 'Critical'].includes(ticket.priority))
+        .filter(ticket => ticket.slaDueAt || ticket.responseDueAt || ['High', 'VeryHigh', 'Critical'].includes(ticket.priority))
         .map(ticket => ({
           ticketNumber: ticket.ticketNumber,
           subject: ticket.subject,
@@ -573,8 +573,8 @@ exports.getDashboardAnalytics = async (req, res) => {
     ] = await Promise.all([
       prisma.ticket.count({ where: ticketWhere }),
       prisma.ticket.count({ where: { ...ticketWhere, status: 'Open' } }),
-      prisma.ticket.count({ where: { ...ticketWhere, status: 'In Progress' } }),
-      prisma.ticket.count({ where: { ...ticketWhere, status: 'On Hold' } }),
+      prisma.ticket.count({ where: { ...ticketWhere, status: 'InProgress' } }),
+      prisma.ticket.count({ where: { ...ticketWhere, status: 'OnHold' } }),
       prisma.ticket.count({ where: { ...ticketWhere, status: 'Resolved' } }),
       prisma.ticket.count({ where: { ...ticketWhere, status: 'Closed' } }),
       prisma.csatResponse.aggregate({ _avg: { rating: true }, _count: { rating: true } }),

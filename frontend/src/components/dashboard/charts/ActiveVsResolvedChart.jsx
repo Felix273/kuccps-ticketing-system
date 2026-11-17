@@ -3,8 +3,8 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recha
 
 const COLORS = {
   Open: '#3b82f6',
-  'In Progress': '#8b5cf6',
-  'On Hold': '#f97316',
+  'InProgress': '#8b5cf6',
+  'OnHold': '#f97316',
   Resolved: '#10b981',
   Closed: '#71717a'
 };

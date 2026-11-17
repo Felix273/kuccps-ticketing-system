@@ -3,7 +3,7 @@ import { Activity, AlertTriangle, CheckCircle, Plus, RadioTower, Send } from 'lu
 import { statusIssueService } from '../../services/statusIssueService';
 import { authService } from '../../services/authService';
 
-const STATUS_OPTIONS = ['Investigating', 'In Progress', 'Monitoring', 'Resolved'];
+const STATUS_OPTIONS = ['Investigating', 'InProgress', 'Monitoring', 'Resolved'];
 const SEVERITY_OPTIONS = ['Informational', 'Minor', 'Major', 'Critical'];
 
 export const StatusPageView = () => {

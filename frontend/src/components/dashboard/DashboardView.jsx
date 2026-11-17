@@ -35,12 +35,12 @@ import { buildTicketTrendData, countTicketsByStatus } from '../../utils/dashboar
 
 const DONUT_COLORS = {
   Open: '#2563eb',
-  'In Progress': '#f59e0b',
-  'On Hold': '#f97316',
+  'InProgress': '#f59e0b',
+  'OnHold': '#f97316',
   Resolved: '#059669',
   Closed: '#71717a'
 };
-const ACTIVE_TICKET_STATUSES = new Set(['Open', 'In Progress', 'On Hold']);
+const ACTIVE_TICKET_STATUSES = new Set(['Open', 'InProgress', 'OnHold']);
 
 const StatusPieTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
@@ -107,8 +107,8 @@ export const DashboardView = ({ tickets = [], isLoading = false, onViewTickets }
     const priorityWatchlist = tickets
       .filter(t => t.status !== 'Resolved' && t.status !== 'Closed')
       .sort((a, b) =>
-        Number(['Critical', 'Very High'].includes(b.priority)) -
-        Number(['Critical', 'Very High'].includes(a.priority))
+        Number(['Critical', 'VeryHigh'].includes(b.priority)) -
+        Number(['Critical', 'VeryHigh'].includes(a.priority))
       )
       .slice(0, 5);
 

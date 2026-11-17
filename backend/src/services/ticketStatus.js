@@ -1,9 +1,9 @@
-const VALID_TICKET_STATUSES = new Set(['Open', 'In Progress', 'On Hold', 'Resolved', 'Closed']);
-const ACTIVE_TICKET_STATUSES = new Set(['Open', 'In Progress', 'On Hold']);
+const VALID_TICKET_STATUSES = new Set(['Open', 'InProgress', 'OnHold', 'Resolved', 'Closed']);
+const ACTIVE_TICKET_STATUSES = new Set(['Open', 'InProgress', 'OnHold']);
 const STATUS_TRANSITIONS = {
-  Open: new Set(['In Progress', 'On Hold', 'Resolved']),
-  'In Progress': new Set(['Open', 'On Hold', 'Resolved']),
-  'On Hold': new Set(['Open', 'In Progress', 'Resolved']),
+  Open: new Set(['InProgress', 'OnHold', 'Resolved']),
+  'InProgress': new Set(['Open', 'OnHold', 'Resolved']),
+  'OnHold': new Set(['Open', 'InProgress', 'Resolved']),
   Resolved: new Set(['Open', 'Closed']),
   Closed: new Set(['Open'])
 };

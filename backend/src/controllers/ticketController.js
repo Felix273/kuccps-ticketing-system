@@ -14,7 +14,7 @@ const {
   isActiveTicketOverdue
 } = require('../services/slaService');
 const prisma = require('../lib/prisma');
-const VALID_PRIORITIES = new Set(['Very High', 'High', 'Medium', 'Low', 'Very Low', 'Critical']);
+const VALID_PRIORITIES = new Set(['VeryHigh', 'High', 'Medium', 'Low', 'VeryLow', 'Critical']);
 
 function decorateTicket(ticket) {
   if (!ticket) return ticket;
@@ -263,7 +263,7 @@ exports.updateTicket = async (req, res) => {
         updateData.closedAt = new Date();
         if (!existing.resolvedAt) updateData.resolvedAt = new Date();
       }
-      if (status === 'Open' || status === 'In Progress') {
+      if (status === 'Open' || status === 'InProgress') {
         updateData.resolvedAt = null;
         updateData.closedAt = null;
       }
@@ -285,8 +285,8 @@ exports.updateTicket = async (req, res) => {
       updateData.assignedToId = assignedToId || null;
       historyEntries.push({ field: 'assignedTo', oldValue: existing.assignedToId, newValue: assignedToId });
       if (assignedToId && existing.status === 'Open' && status === undefined) {
-        updateData.status = 'In Progress';
-        historyEntries.push({ field: 'status', oldValue: existing.status, newValue: 'In Progress' });
+        updateData.status = 'InProgress';
+        historyEntries.push({ field: 'status', oldValue: existing.status, newValue: 'InProgress' });
       }
     }
     if (departmentId && departmentId !== existing.departmentId) {
@@ -417,7 +417,7 @@ exports.escalateTicket = async (req, res) => {
 
     const updateData = {
       assignedToId: targetUser.id,
-      status: ticket.status === 'Open' ? 'In Progress' : ticket.status
+      status: ticket.status === 'Open' ? 'InProgress' : ticket.status
     };
 
     const updated = await prisma.ticket.update({
@@ -644,10 +644,10 @@ exports.getStatistics = async (req, res) => {
     const [total, open, inProgress, resolved, closed, onHold, critical, overdue] = await Promise.all([
       prisma.ticket.count(),
       prisma.ticket.count({ where: { status: 'Open' } }),
-      prisma.ticket.count({ where: { status: 'In Progress' } }),
+      prisma.ticket.count({ where: { status: 'InProgress' } }),
       prisma.ticket.count({ where: { status: 'Resolved' } }),
       prisma.ticket.count({ where: { status: 'Closed' } }),
-      prisma.ticket.count({ where: { status: 'On Hold' } }),
+      prisma.ticket.count({ where: { status: 'OnHold' } }),
       prisma.ticket.count({ where: { priority: 'Critical', status: { notIn: ['Resolved', 'Closed'] } } }),
       prisma.ticket.count({
         where: {

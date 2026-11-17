@@ -30,7 +30,7 @@ const SLA_CATEGORIES = [
   'Information Inquiry'
 ];
 
-const SEVERITIES = ['Very High', 'High', 'Medium', 'Low', 'Very Low'];
+const SEVERITIES = ['VeryHigh', 'High', 'Medium', 'Low', 'VeryLow'];
 const ESCALATION_POLICY_KEY = 'operational:escalation-grace';
 
 function categoryPolicyKey(category) {
@@ -42,7 +42,7 @@ function severityPolicyKey(severity) {
 }
 
 function normalizeSeverity(priority) {
-  if (priority === 'Critical') return 'Very High';
+  if (priority === 'Critical') return 'VeryHigh';
   return SEVERITIES.includes(priority) ? priority : 'Medium';
 }
 
@@ -288,7 +288,7 @@ function calculateTicketSlaDeadlines({ category, priority, createdAt, policies }
     : addSlaDuration(createdAt, policy.resolutionValue, policy.resolutionUnit);
   const severity = normalizeSeverity(priority);
   const escalation = policyMap.get(ESCALATION_POLICY_KEY);
-  const slaEscalationAt = slaDueAt && ['Very High', 'High'].includes(severity) && escalation?.escalationGraceHours
+  const slaEscalationAt = slaDueAt && ['VeryHigh', 'High'].includes(severity) && escalation?.escalationGraceHours
     ? new Date(slaDueAt.getTime() + escalation.escalationGraceHours * 60 * 60_000)
     : null;
 
@@ -315,7 +315,7 @@ async function getConfiguredTicketSlaDeadlines(client, category, priority, creat
   if (!policy) {
     throw new Error(`SLA timeline is not seeded for ${category}; run the SLA seed before creating tickets`);
   }
-  if (['High', 'Very High'].includes(normalizeSeverity(priority)) &&
+  if (['High', 'VeryHigh'].includes(normalizeSeverity(priority)) &&
     policy.resolutionValue != null &&
     !policies.some(item => item.policyKey === ESCALATION_POLICY_KEY)) {
     throw new Error('SLA escalation settings are not seeded; run the SLA seed before creating tickets');
@@ -421,12 +421,12 @@ function buildSlaCategoryIssues(groups) {
 }
 
 function isActiveTicketOverdue(ticket, now = new Date()) {
-  if (!['Open', 'In Progress', 'On Hold'].includes(ticket.status)) return false;
+  if (!['Open', 'InProgress', 'OnHold'].includes(ticket.status)) return false;
   return Boolean(getActiveOverdueDeadline(ticket, now));
 }
 
 function getActiveOverdueDeadline(ticket, now = new Date()) {
-  if (!['Open', 'In Progress', 'On Hold'].includes(ticket.status)) return null;
+  if (!['Open', 'InProgress', 'OnHold'].includes(ticket.status)) return null;
   const deadlines = [];
   if (ticket.responseDueAt && !ticket.firstRespondedAt) deadlines.push(new Date(ticket.responseDueAt));
   if (ticket.slaDueAt && !ticket.resolvedAt) deadlines.push(new Date(ticket.slaDueAt));

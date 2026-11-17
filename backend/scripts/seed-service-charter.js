@@ -1,5 +1,10 @@
 const { PrismaClient } = require('@prisma/client');
-const { calculateTicketSlaDeadlines, isActiveTicketOverdue } = require('../src/services/slaService');
+const { 
+  calculateTicketSlaDeadlines, 
+  isActiveTicketOverdue, 
+  SLA_DEFAULT_POLICIES 
+} = require('../src/services/slaService');
+
 const prisma = new PrismaClient();
 
 async function run() {
@@ -38,13 +43,14 @@ The Kenya Universities and Colleges Central Placement Service (KUCCPS) ICT Direc
 *Working Hours:* Monday to Friday, 8:00 AM – 5:00 PM EAT (excluding gazetted public holidays in Kenya).
 `.trim();
 
+  // 1. Upsert Service Charter into Knowledge Base
   await prisma.knowledgeArticle.upsert({
     where: { slug: charterSlug },
     update: {
       title: charterTitle,
       category: 'General Requests',
       affectedDevices: 'Institutional ICT Support Desk',
-      symptoms: 'Charter reference for Service Desk delivery timelines, ticket response targets, and escalation thresholds.',
+      symptoms: 'Official Charter reference for Service Desk delivery timelines, ticket response targets, and escalation thresholds.',
       cause: 'Governance & Service Level Agreement compliance.',
       resolution: charterContent,
       escalation: 'If SLA is breached, ticket escalates to Head of ICT Directorate automatically.',
@@ -60,7 +66,7 @@ The Kenya Universities and Colleges Central Placement Service (KUCCPS) ICT Direc
       slug: charterSlug,
       category: 'General Requests',
       affectedDevices: 'Institutional ICT Support Desk',
-      symptoms: 'Charter reference for Service Desk delivery timelines, ticket response targets, and escalation thresholds.',
+      symptoms: 'Official Charter reference for Service Desk delivery timelines, ticket response targets, and escalation thresholds.',
       cause: 'Governance & Service Level Agreement compliance.',
       resolution: charterContent,
       escalation: 'If SLA is breached, ticket escalates to Head of ICT Directorate automatically.',
@@ -73,10 +79,16 @@ The Kenya Universities and Colleges Central Placement Service (KUCCPS) ICT Direc
     }
   });
 
-  console.log('✓ Service Charter article published in Knowledge Base.');
+  console.log('✓ Service Charter article successfully published in Knowledge Base.');
 
-  // 2. Recalculate SLA Deadlines & Overdue Status for ALL existing tickets
-  console.log('⏱ Recalculating SLA thresholds and overdue flags for all tickets in database...');
+  // 2. Fetch policies from DB (fallback to defaults if empty)
+  let policies = await prisma.slaPolicy.findMany({ where: { isSlaDefault: true } });
+  if (!policies || policies.length === 0) {
+    policies = SLA_DEFAULT_POLICIES || [];
+  }
+
+  // 3. Recalculate SLA Deadlines & Overdue Status for ALL existing tickets
+  console.log('⏱ Recalculating SLA thresholds and overdue flags for all tickets...');
   const tickets = await prisma.ticket.findMany();
   let updatedCount = 0;
   let overdueCount = 0;
@@ -85,7 +97,8 @@ The Kenya Universities and Colleges Central Placement Service (KUCCPS) ICT Direc
     const deadlines = calculateTicketSlaDeadlines({
       category: ticket.category,
       priority: ticket.priority,
-      createdAt: ticket.createdAt
+      createdAt: ticket.createdAt,
+      policies
     });
 
     const isOverdue = isActiveTicketOverdue({
@@ -107,7 +120,7 @@ The Kenya Universities and Colleges Central Placement Service (KUCCPS) ICT Direc
     updatedCount++;
   }
 
-  console.log(`✓ SLA Alignment Complete: ${updatedCount} tickets processed. ${overdueCount} tickets are currently Overdue.`);
+  console.log(`✓ SLA Alignment Complete: ${updatedCount} tickets processed. ${overdueCount} tickets flagged as Overdue according to Charter.`);
 }
 
 run()

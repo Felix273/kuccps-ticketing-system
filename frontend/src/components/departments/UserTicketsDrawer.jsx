@@ -41,8 +41,8 @@ export const UserTicketsDrawer = ({ user, tickets = [], onClose, onReassign }) =
   const stats = {
     total: userTickets.length,
     open: userTickets.filter(t => t.status === 'Open').length,
-    inProgress: userTickets.filter(t => t.status === 'In Progress').length,
-    onHold: userTickets.filter(t => t.status === 'On Hold').length,
+    inProgress: userTickets.filter(t => t.status === 'InProgress').length,
+    onHold: userTickets.filter(t => t.status === 'OnHold').length,
     resolved: userTickets.filter(t => t.status === 'Resolved').length,
     closed: userTickets.filter(t => t.status === 'Closed').length
   };
@@ -56,14 +56,14 @@ export const UserTicketsDrawer = ({ user, tickets = [], onClose, onReassign }) =
             Open
           </span>
         );
-      case 'In Progress':
+      case 'InProgress':
         return (
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-amber-700 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
             In Progress
           </span>
         );
-      case 'On Hold':
+      case 'OnHold':
         return (
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-orange-700 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
@@ -98,7 +98,7 @@ export const UserTicketsDrawer = ({ user, tickets = [], onClose, onReassign }) =
     const displayPriority = normalizePriority(priority);
     switch (displayPriority) {
       case 'Critical':
-      case 'Very High':
+      case 'VeryHigh':
         return (
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-rose-700 font-semibold">
             <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-pulse"></span>

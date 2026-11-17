@@ -78,7 +78,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
   }, [ticket.id]);
 
   const handleStatusUpdate = async (newStatus) => {
-    const confirmation = newStatus === 'On Hold'
+    const confirmation = newStatus === 'OnHold'
       ? 'Put this ticket On Hold while waiting for a dependency or information?'
       : newStatus === 'Resolved'
         ? 'Mark this ticket Resolved? The requester will receive a satisfaction rating link.'
@@ -88,7 +88,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
     if (!confirm(confirmation)) return;
     setIsUpdating(true);
     try {
-      const result = newStatus === 'In Progress' && currentUser?.id
+      const result = newStatus === 'InProgress' && currentUser?.id
         ? await ticketService.startWorking(ticket.id, currentUser.id)
         : await ticketService.updateStatus(ticket.id, newStatus);
       if (result.success) {
@@ -186,13 +186,13 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
       case 'Open':
         actions.push({
           label: 'Start Working',
-          status: 'In Progress',
+          status: 'InProgress',
           icon: <PlayCircle className="w-3.5 h-3.5" />,
           isPrimary: false
         });
         actions.push({
           label: 'Put On Hold',
-          status: 'On Hold',
+          status: 'OnHold',
           icon: <Clock className="w-3.5 h-3.5" />,
           isPrimary: false
         });
@@ -203,7 +203,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
           isPrimary: true
         });
         break;
-      case 'In Progress':
+      case 'InProgress':
         actions.push({
           label: 'Reopen',
           status: 'Open',
@@ -212,7 +212,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
         });
         actions.push({
           label: 'Put On Hold',
-          status: 'On Hold',
+          status: 'OnHold',
           icon: <Clock className="w-3.5 h-3.5" />,
           isPrimary: false
         });
@@ -223,10 +223,10 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
           isPrimary: true
         });
         break;
-      case 'On Hold':
+      case 'OnHold':
         actions.push({
           label: 'Resume Work',
-          status: 'In Progress',
+          status: 'InProgress',
           icon: <PlayCircle className="w-3.5 h-3.5" />,
           isPrimary: false
         });
@@ -315,9 +315,9 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
                 <span className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold px-2 py-0.5 rounded border border-zinc-200 bg-zinc-50 text-zinc-700">
                   <span className={`w-1.5 h-1.5 rounded-full ${
                     ticket.status === 'Resolved' ? 'bg-emerald-500' :
-                    ticket.status === 'In Progress' ? 'bg-amber-500 animate-pulse' :
+                    ticket.status === 'InProgress' ? 'bg-amber-500 animate-pulse' :
                     ticket.status === 'Open' ? 'bg-blue-500' :
-                    ticket.status === 'On Hold' ? 'bg-orange-500' : 'bg-zinc-400'
+                    ticket.status === 'OnHold' ? 'bg-orange-500' : 'bg-zinc-400'
                   }`}></span>
                   {ticket.status}
                 </span>
@@ -325,7 +325,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
                 {/* Linear Priority Indicator */}
                 <span className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold px-2 py-0.5 rounded border border-zinc-200 bg-zinc-50 text-zinc-700">
                   <span className={`w-1.5 h-1.5 rounded-full ${
-                    ticket.priority === 'Critical' || ticket.priority === 'Very High' ? 'bg-rose-500 animate-pulse' :
+                    ticket.priority === 'Critical' || ticket.priority === 'VeryHigh' ? 'bg-rose-500 animate-pulse' :
                     ticket.priority === 'High' ? 'bg-amber-500' : 'bg-zinc-400'
                   }`}></span>
                   {normalizePriority(ticket.priority) || 'Normal'}

@@ -2,7 +2,7 @@ const cron = require('node-cron');
 const { createTicketNotification } = require('./notificationService');
 
 const prisma = require('../lib/prisma');
-const ACTIVE_STATUSES = ['Open', 'In Progress', 'On Hold'];
+const ACTIVE_STATUSES = ['Open', 'InProgress', 'OnHold'];
 
 async function sendEscalationAlerts() {
   const now = new Date();
@@ -10,7 +10,7 @@ async function sendEscalationAlerts() {
   const overdueTickets = await prisma.ticket.findMany({
     where: {
       status: { in: ACTIVE_STATUSES },
-      priority: { in: ['High', 'Very High', 'Critical'] },
+      priority: { in: ['High', 'VeryHigh', 'Critical'] },
       OR: [
         { slaEscalationAt: { not: null, lte: now } },
         {

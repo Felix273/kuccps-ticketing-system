@@ -36,8 +36,8 @@ export const DepartmentDetailModal = ({ department, tickets = [], users = [], on
     return deptUsers.map(user => {
       const userTickets = deptTickets.filter(t => t.assignedToId === user.id);
       const open = userTickets.filter(t => t.status === 'Open').length;
-      const inProgress = userTickets.filter(t => t.status === 'In Progress').length;
-      const onHold = userTickets.filter(t => t.status === 'On Hold').length;
+      const inProgress = userTickets.filter(t => t.status === 'InProgress').length;
+      const onHold = userTickets.filter(t => t.status === 'OnHold').length;
       const resolved = userTickets.filter(t => t.status === 'Resolved').length;
       const closed = userTickets.filter(t => t.status === 'Closed').length;
       const critical = userTickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved' && t.status !== 'Closed').length;
@@ -63,8 +63,8 @@ export const DepartmentDetailModal = ({ department, tickets = [], users = [], on
   const deptStats = {
     totalTickets: deptTickets.length,
     open: deptTickets.filter(t => t.status === 'Open').length,
-    inProgress: deptTickets.filter(t => t.status === 'In Progress').length,
-    onHold: deptTickets.filter(t => t.status === 'On Hold').length,
+    inProgress: deptTickets.filter(t => t.status === 'InProgress').length,
+    onHold: deptTickets.filter(t => t.status === 'OnHold').length,
     resolved: deptTickets.filter(t => t.status === 'Resolved').length,
     closed: deptTickets.filter(t => t.status === 'Closed').length,
     critical: deptTickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved' && t.status !== 'Closed').length,

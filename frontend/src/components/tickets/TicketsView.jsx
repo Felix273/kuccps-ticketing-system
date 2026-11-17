@@ -64,9 +64,9 @@ export const TicketsView = ({
       all: tickets.length,
       unassigned: tickets.filter(t => !t.assignedToId).length,
       myTickets: tickets.filter(t => currentUser?.id && t.assignedToId === currentUser.id).length,
-      critical: tickets.filter(t => normalizePriority(t.priority) === 'Very High' && t.status !== 'Resolved' && t.status !== 'Closed').length,
-      inProgress: tickets.filter(t => t.status === 'In Progress').length,
-      onHold: tickets.filter(t => t.status === 'On Hold').length,
+      critical: tickets.filter(t => normalizePriority(t.priority) === 'VeryHigh' && t.status !== 'Resolved' && t.status !== 'Closed').length,
+      inProgress: tickets.filter(t => t.status === 'InProgress').length,
+      onHold: tickets.filter(t => t.status === 'OnHold').length,
       resolved: tickets.filter(t => t.status === 'Resolved').length,
       closed: tickets.filter(t => t.status === 'Closed').length
     };
@@ -85,11 +85,11 @@ export const TicketsView = ({
     } else if (activeSegment === 'my-tickets') {
       if (currentUser?.id) result = result.filter(t => t.assignedToId === currentUser.id);
     } else if (activeSegment === 'critical') {
-      result = result.filter(t => normalizePriority(t.priority) === 'Very High' && t.status !== 'Resolved' && t.status !== 'Closed');
+      result = result.filter(t => normalizePriority(t.priority) === 'VeryHigh' && t.status !== 'Resolved' && t.status !== 'Closed');
     } else if (activeSegment === 'in-progress') {
-      result = result.filter(t => t.status === 'In Progress');
+      result = result.filter(t => t.status === 'InProgress');
     } else if (activeSegment === 'on-hold') {
-      result = result.filter(t => t.status === 'On Hold');
+      result = result.filter(t => t.status === 'OnHold');
     } else if (activeSegment === 'resolved') {
       result = result.filter(t => t.status === 'Resolved');
     } else if (activeSegment === 'closed') {
@@ -168,14 +168,14 @@ export const TicketsView = ({
             Open
           </span>
         );
-      case 'In Progress':
+      case 'InProgress':
         return (
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-amber-700 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
             In Progress
           </span>
         );
-      case 'On Hold':
+      case 'OnHold':
         return (
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-orange-700 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
@@ -211,7 +211,7 @@ export const TicketsView = ({
     const displayPriority = normalizePriority(priority);
     switch (displayPriority) {
       case 'Critical':
-      case 'Very High':
+      case 'VeryHigh':
         return (
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-rose-700 font-semibold">
             <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-pulse"></span>

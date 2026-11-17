@@ -19,7 +19,7 @@ export const DepartmentCard = ({ department, tickets = [], users = [], onViewDet
   const userCount = department._count?.users || deptUsers.length;
 
   const openTickets = deptTickets.filter(t => t.status === 'Open').length;
-  const inProgressTickets = deptTickets.filter(t => t.status === 'In Progress').length;
+  const inProgressTickets = deptTickets.filter(t => t.status === 'InProgress').length;
   const resolvedTickets = deptTickets.filter(t => t.status === 'Resolved' || t.status === 'Closed').length;
   const criticalTickets = deptTickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved' && t.status !== 'Closed').length;
 

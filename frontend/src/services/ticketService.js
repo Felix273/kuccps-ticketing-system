@@ -22,7 +22,7 @@ export const ticketService = {
   },
 
   async startWorking(id, userId) {
-    return api.put(`/tickets/${id}`, { status: 'In Progress', assignedToId: userId });
+    return api.put(`/tickets/${id}`, { status: 'InProgress', assignedToId: userId });
   },
   
   async delete(id) {

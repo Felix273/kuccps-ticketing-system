@@ -57,8 +57,8 @@ export const calculateAnalytics = (tickets) => {
     avgResolutionTime: avgResolutionTime.toFixed(1),
     totalTickets: tickets.length,
     openTickets: tickets.filter(t => t.status === 'Open').length,
-    inProgressTickets: tickets.filter(t => t.status === 'In Progress').length,
+    inProgressTickets: tickets.filter(t => t.status === 'InProgress').length,
     resolvedTickets: tickets.filter(t => t.status === 'Resolved').length,
-    criticalTickets: tickets.filter(t => normalizePriority(t.priority) === 'Very High' && t.status !== 'Resolved' && t.status !== 'Closed').length
+    criticalTickets: tickets.filter(t => normalizePriority(t.priority) === 'VeryHigh' && t.status !== 'Resolved' && t.status !== 'Closed').length
   };
 };

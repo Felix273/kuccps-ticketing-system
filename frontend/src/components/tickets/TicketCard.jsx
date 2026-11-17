@@ -26,14 +26,14 @@ export const TicketCard = ({ ticket, onClaim, onViewDetails, currentUser }) => {
             Open
           </span>
         );
-      case 'In Progress':
+      case 'InProgress':
         return (
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-amber-700 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
             In Progress
           </span>
         );
-      case 'On Hold':
+      case 'OnHold':
         return (
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-orange-700 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
@@ -69,7 +69,7 @@ export const TicketCard = ({ ticket, onClaim, onViewDetails, currentUser }) => {
     const displayPriority = normalizePriority(priority);
     switch (displayPriority) {
       case 'Critical':
-      case 'Very High':
+      case 'VeryHigh':
         return (
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-rose-700 font-semibold">
             <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-pulse"></span>

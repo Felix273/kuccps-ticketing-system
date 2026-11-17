@@ -1,4 +1,4 @@
-export const TICKET_STATUSES = ['Open', 'In Progress', 'On Hold', 'Resolved', 'Closed'];
+export const TICKET_STATUSES = ['Open', 'InProgress', 'OnHold', 'Resolved', 'Closed'];
 
 export function countTicketsByStatus(tickets = []) {
   const counts = Object.fromEntries(TICKET_STATUSES.map(status => [status, 0]));
