@@ -66,7 +66,7 @@ test('SLA defaults cover the exact categories and incident severities', () => {
   assert.deepEqual([...new Set(categoryPolicies.map(policy => policy.category))], SLA_CATEGORIES);
   assert.deepEqual(
     categoryPolicies.filter(policy => policy.category === 'Incident/Problem Resolution').map(policy => policy.priority),
-    ['Very High', 'High', 'Medium', 'Low', 'Very Low']
+    ['VeryHigh', 'High', 'Medium', 'Low', 'VeryLow']
   );
   assert.equal(SLA_DEFAULT_POLICIES.find(policy => policy.name === 'Software Development').resolutionValue, null);
 });
@@ -74,7 +74,7 @@ test('SLA defaults cover the exact categories and incident severities', () => {
 test('re-running SLA seed preserves admin-edited values but updates SLA defaults', async () => {
   const { client, policies } = createPolicyStore();
   await seedSlaPolicies(client);
-  const veryHigh = [...policies.values()].find(policy => policy.name === 'Incident/Problem Resolution — Very High');
+  const veryHigh = [...policies.values()].find(policy => policy.name === 'Incident/Problem Resolution — VeryHigh');
   await client.slaPolicy.update({
     where: { policyKey: veryHigh.policyKey },
     data: { responseValue: 45 }
@@ -87,7 +87,7 @@ test('re-running SLA seed preserves admin-edited values but updates SLA defaults
 });
 
 test('SLA timeline validation rejects invalid durations and response times longer than resolution', () => {
-  const policy = SLA_DEFAULT_POLICIES.find(item => item.priority === 'Very High');
+  const policy = SLA_DEFAULT_POLICIES.find(item => item.priority === 'VeryHigh');
   assert.match(validateSlaPolicyUpdates([{ policyKey: policy.policyKey, responseValue: 0 }]), /0.1 to 3650/);
   assert.match(validateSlaPolicyUpdates([{ policyKey: policy.policyKey, responseValue: 0.05 }]), /0.1 to 3650/);
   assert.match(validateSlaPolicyUpdates([{ policyKey: policy.policyKey, responseValue: 3651 }]), /0.1 to 3650/);
@@ -140,7 +140,7 @@ test('all UI policy rows, including qualitative and escalation rows, are accepte
 test('timeline updates and resets keep an actor-attributed old/new audit trail', async () => {
   const { client, policies, audits } = createPolicyStore();
   await seedSlaPolicies(client);
-  const policy = [...policies.values()].find(item => item.priority === 'Very High');
+  const policy = [...policies.values()].find(item => item.priority === 'VeryHigh');
   const user = { id: 'admin-1', name: 'SLA Admin' };
   const updates = [{
     policyKey: policy.policyKey,
@@ -171,7 +171,7 @@ test('working-time deadlines skip weekends and Kenya public holidays', () => {
 test('ticket deadline snapshots use edited timelines and snapshot configured compliance goals', async () => {
   const { client, policies } = createPolicyStore();
   await seedSlaPolicies(client);
-  const veryHigh = [...policies.values()].find(policy => policy.priority === 'Very High');
+  const veryHigh = [...policies.values()].find(policy => policy.priority === 'VeryHigh');
   await client.slaPolicy.update({
     where: { policyKey: veryHigh.policyKey },
     data: { responseValue: 45 }
@@ -192,7 +192,7 @@ test('ticket deadline snapshots use edited timelines and snapshot configured com
 test('compliance boundaries are inclusive and target attainment uses SLA percentages', () => {
   const dueAt = new Date('2026-02-02T10:00:00.000Z');
   const atDeadline = calculateSlaCompliance([{
-    status: 'In Progress',
+    status: 'InProgress',
     responseDueAt: dueAt,
     firstRespondedAt: dueAt,
     slaResponseTargetPercent: 90,
@@ -205,7 +205,7 @@ test('compliance boundaries are inclusive and target attainment uses SLA percent
   assert.equal(atDeadline.targetAttainment.resolution[0].goalMet, true);
 
   const afterDeadline = calculateSlaCompliance([{
-    status: 'In Progress',
+    status: 'InProgress',
     responseDueAt: dueAt,
     slaResponseTargetPercent: 90,
     slaDueAt: dueAt,
@@ -219,7 +219,7 @@ test('compliance boundaries are inclusive and target attainment uses SLA percent
 
 test('active ticket overdue checks use exact stored deadlines and include On Hold tickets', () => {
   const dueAt = new Date('2026-02-02T10:00:00.000Z');
-  const ticket = { status: 'On Hold', responseDueAt: null, slaDueAt: dueAt, resolvedAt: null };
+  const ticket = { status: 'OnHold', responseDueAt: null, slaDueAt: dueAt, resolvedAt: null };
   assert.equal(isActiveTicketOverdue(ticket, dueAt), false);
   assert.equal(isActiveTicketOverdue(ticket, new Date(dueAt.getTime() + 1)), true);
   assert.equal(isActiveTicketOverdue({ ...ticket, status: 'Resolved' }, new Date(dueAt.getTime() + 1)), false);
