@@ -1,6 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
 const { parseDelimitedValues } = require('../services/normalizedValues');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 function parseSystems(value) {
   return parseDelimitedValues(value).map(name => ({

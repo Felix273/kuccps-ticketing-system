@@ -1,10 +1,9 @@
-const { PrismaClient } = require('@prisma/client');
 const { clearSettingsCache } = require('../services/emailService');
 const { SETTINGS_FIELD_SECTIONS } = require('../services/accessControlService');
 const { parseDelimitedValues } = require('../services/normalizedValues');
 const { getDefaultAllowedFileTypesRelation } = require('../services/systemSettingsDefaults');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 function serializeSettings(settings) {
   return {

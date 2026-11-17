@@ -1,4 +1,3 @@
-const { PrismaClient } = require('@prisma/client');
 const {
   CSAT_SATISFIED_MIN_RATING,
   calculateSatisfactionRate,
@@ -14,7 +13,7 @@ const {
   saveSlaPolicyUpdates,
   validateSlaPolicyUpdates
 } = require('../services/slaService');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 const OPEN_STATUSES = new Set(['Open', 'In Progress', 'On Hold']);
 const RESOLVED_STATUSES = new Set(['Resolved', 'Closed']);

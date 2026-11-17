@@ -7,14 +7,17 @@ enum Role {
 enum TicketStatus {
   Open
   InProgress
+  OnHold
   Resolved
   Closed
 }
 
 enum TicketPriority {
+  VeryLow
   Low
   Medium
   High
+  VeryHigh
   Critical
 }
 

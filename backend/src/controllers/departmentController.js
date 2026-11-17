@@ -1,6 +1,6 @@
-const { PrismaClient } = require('@prisma/client');
+
 const adService = require('../services/adService');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Get all departments
 exports.getAllDepartments = async (req, res) => {

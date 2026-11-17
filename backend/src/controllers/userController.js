@@ -1,7 +1,6 @@
-const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const adService = require('../services/adService');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 const VALID_ROLES = new Set(['user', 'staff', 'admin']);
 

@@ -1,12 +1,11 @@
 const jwt = require('jsonwebtoken');
-const { PrismaClient } = require('@prisma/client');
 const {
   SETTINGS_SECTIONS,
   getRequiredSettingsPermissions,
   getPermissionsForUser,
   requirePermission
 } = require('../services/accessControlService');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 const authenticateToken = (req, res, next) => {
   try {

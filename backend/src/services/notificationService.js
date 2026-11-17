@@ -1,7 +1,7 @@
-const { PrismaClient } = require('@prisma/client');
+
 const { createEmailTransporter, getSystemSettings } = require('./emailService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 function escapeHtml(value) {
   return String(value || '').replace(/[&<>"']/g, character => ({

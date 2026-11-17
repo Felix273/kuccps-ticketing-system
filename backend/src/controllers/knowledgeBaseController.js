@@ -1,9 +1,8 @@
-const { PrismaClient } = require('@prisma/client');
 const fs = require('fs');
 const path = require('path');
 const { uploadDir, resolveUploadPath, removeUploadFile } = require('../services/uploadStorage');
 const { parseDelimitedValues } = require('../services/normalizedValues');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 const articleRelations = {
   tags: { include: { tag: true } },

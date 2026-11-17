@@ -1,8 +1,7 @@
 const cron = require('node-cron');
-const { PrismaClient } = require('@prisma/client');
 const { createTicketNotification } = require('./notificationService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 const ACTIVE_STATUSES = ['Open', 'In Progress', 'On Hold'];
 
 async function sendEscalationAlerts() {

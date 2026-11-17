@@ -1,8 +1,7 @@
 const ldap = require('ldapjs');
 const bcrypt = require('bcryptjs');
-const { PrismaClient } = require('@prisma/client');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 const DEFAULT_USER_FILTER = '(&(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))';
 const DEFAULT_DIRECTORATE_FILTER = '(|(objectClass=organizationalUnit)(objectClass=group))';

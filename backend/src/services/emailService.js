@@ -2,7 +2,6 @@ const nodemailer = require('nodemailer');
 const { simpleParser } = require('mailparser');
 const Imap = require('imap');
 const cron = require('node-cron');
-const { PrismaClient } = require('@prisma/client');
 const { getConfiguredTicketSlaDeadlines, getTicketSlaChecks } = require('./slaService');
 const { getDefaultAllowedFileTypesRelation } = require('./systemSettingsDefaults');
 const {
@@ -11,7 +10,7 @@ const {
   renderCsatLinks
 } = require('./csatService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 function getInitialEmailSettings() {
   return {

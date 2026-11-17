@@ -1,10 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, requirePermission } = require('../middleware/auth');
-const { PrismaClient } = require('@prisma/client');
 const { sendEmailNotification } = require('../services/notificationService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 const DEFAULT_PREFERENCES = {
   emailOnAssignment: true,

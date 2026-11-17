@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../lib/prisma';
 import {
   SETTINGS_SECTIONS,
   getRequiredSettingsPermissions,
@@ -8,7 +8,6 @@ import {
 } from '../services/accessControlService';
 import { Request, Response, NextFunction } from 'express';
 
-const prisma = new PrismaClient();
 
 interface TokenUser {
   id: string;

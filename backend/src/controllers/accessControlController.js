@@ -1,4 +1,4 @@
-const { PrismaClient, Prisma } = require('@prisma/client');
+const { Prisma } = require('@prisma/client');
 const {
   PERMISSIONS,
   getPermissionsForUser,
@@ -9,7 +9,7 @@ const {
   canRemoveLastAdmin
 } = require('../services/accessControlService');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 const RESERVED_ADMIN_PERMISSION = 'access-control.manage';
 
 function getActor(req) {

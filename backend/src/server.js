@@ -1,6 +1,7 @@
 require('dotenv/config');
 const express = require('express');
 const cors = require('cors');
+const cron = require('node-cron');
 const authRoutes = require('./routes/auth');
 const ticketRoutes = require('./routes/tickets');
 const departmentRoutes = require('./routes/departments');
@@ -8,13 +9,13 @@ const userRoutes = require('./routes/users');
 const publicTicketRoutes = require('./routes/publicTickets');
 const { startEmailMonitoring } = require('./services/emailService');
 const { startNotificationJobs } = require('./services/notificationScheduler');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('./lib/prisma');
 const { requestId, securityHeaders, rateLimit, validateProductionConfig } = require('./middleware/security');
+const { notFoundHandler } = require('./middleware/errorHandler');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || (process.env.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0');
-const prisma = new PrismaClient();
 
 validateProductionConfig();
 
@@ -77,6 +78,10 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// 404 handler — must come after all routes
+app.use(notFoundHandler);
+
+// Global error handler — must come last
 app.use((err, req, res, next) => {
   if (err?.message === 'CORS origin denied') {
     return res.status(403).json({ success: false, message: 'CORS origin denied' });
@@ -95,7 +100,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log(`✓ Server running at http://${HOST}:${PORT}`);
   console.log(`✓ API available at http://${HOST}:${PORT}`);
   startNotificationJobs();
@@ -114,8 +119,26 @@ app.listen(PORT, HOST, () => {
   }
 });
 
-module.exports = app;
-// Updated 17 Februari 2026 11:41:36 asubuhi EAT
+// ─────────────────────────────────────────────────────────────
+// GRACEFUL SHUTDOWN
+// ─────────────────────────────────────────────────────────────
+async function shutdown(signal) {
+  console.log(`${signal} received. Shutting down gracefully...`);
+  server.close(async () => {
+    await prisma.$disconnect();
+    console.log('✓ Server closed');
+    process.exit(0);
+  });
+
+  // Force shutdown after 10 seconds if graceful shutdown stalls
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 // ─────────────────────────────────────────────────────────────
 // AUTOMATED ACTIVE DIRECTORY INGESTION ENGINE
@@ -150,5 +173,7 @@ async function runAutomatedAdSync() {
 // Automatically trigger initial directory harvest 10 seconds after boot
 setTimeout(runAutomatedAdSync, 10000);
 
-// Schedule automatic background refresh every 24 hours
-setInterval(runAutomatedAdSync, 24 * 60 * 60 * 1000);
+// Schedule automatic background refresh daily at 2:00 AM
+cron.schedule('0 2 * * *', runAutomatedAdSync);
+
+module.exports = app;

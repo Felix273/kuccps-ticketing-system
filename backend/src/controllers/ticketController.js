@@ -1,4 +1,3 @@
-const { PrismaClient } = require('@prisma/client');
 const { resolveUploadPath, removeUploadFile } = require('../services/uploadStorage');
 const { sendEmail, sendTicketReply } = require('../services/emailService');
 const { createTicketNotification } = require('../services/notificationService');
@@ -14,7 +13,7 @@ const {
   getTicketSlaChecks,
   isActiveTicketOverdue
 } = require('../services/slaService');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 const VALID_PRIORITIES = new Set(['Very High', 'High', 'Medium', 'Low', 'Very Low', 'Critical']);
 
 function decorateTicket(ticket) {
