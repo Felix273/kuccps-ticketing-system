@@ -23,7 +23,7 @@ flowchart TD
 | Component | Recommended | Alternatives |
 |-----------|-------------|--------------|
 | Frontend | Vercel, Netlify, or static VPS | Cloudflare Pages, AWS S3 + CloudFront |
-| Backend | Railway, Render, or VPS | AWS EC2, Google Cloud Run, Docker |
+| Backend | Railway or VPS | AWS EC2, Google Cloud Run, Docker |
 | Database | Supabase, Neon, or managed PostgreSQL | AWS RDS, Google Cloud SQL |
 | Reverse Proxy | Nginx on same VPS as backend | Caddy, Cloudflare Tunnel |
 

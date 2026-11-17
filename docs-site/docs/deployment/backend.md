@@ -7,7 +7,6 @@ This guide covers deploying the Node.js/Express backend to production.
 | Platform | Pros | Cons |
 |----------|------|------|
 | **Railway** | Easy deployment, PostgreSQL included, auto-scaling | Higher cost at scale |
-| **Render** | Free tier, easy setup | Cold starts on free tier |
 | **VPS (Ubuntu)** | Full control, cost-effective | Manual setup and maintenance |
 | **Docker** | Consistent environment, portable | Requires container knowledge |
 | **AWS EC2 / GCP** | Scalable, enterprise-grade | Complex setup |
