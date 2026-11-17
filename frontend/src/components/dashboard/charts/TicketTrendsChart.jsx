@@ -4,18 +4,28 @@ import { TrendingUp } from 'lucide-react';
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
+    const values = {
+      created: payload.find(item => item.dataKey === 'created')?.value || 0,
+      resolved: payload.find(item => item.dataKey === 'resolved')?.value || 0,
+      closed: payload.find(item => item.dataKey === 'closed')?.value || 0
+    };
     return (
       <div className="bg-slate-900 text-white rounded-lg px-3 py-2 text-xs shadow-xl border border-slate-800 space-y-1">
         <p className="font-semibold text-slate-300">{label}</p>
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-[#990024]"></span>
-          <span className="text-slate-200">New Tickets:</span>
-          <span className="font-bold text-white">{payload[0]?.value}</span>
+          <span className="text-slate-200">Created:</span>
+          <span className="font-bold text-white">{values.created}</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
           <span className="text-slate-200">Resolved:</span>
-          <span className="font-bold text-white">{payload[1]?.value}</span>
+          <span className="font-bold text-white">{values.resolved}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-zinc-400"></span>
+          <span className="text-slate-200">Closed:</span>
+          <span className="font-bold text-white">{values.closed}</span>
         </div>
       </div>
     );
@@ -29,21 +39,25 @@ export const TicketTrendsChart = ({ data }) => (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
       <div>
         <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
-          Ticket Volume & Resolution Trends
+          Ticket Lifecycle Activity
         </h3>
         <p className="text-xs text-slate-400 mt-0.5">
-          Daily influx vs. resolved support requests over the last 7 days
+          Daily created, resolved, and closed events over the last 7 days
         </p>
       </div>
 
       <div className="flex items-center gap-4 text-xs">
         <div className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-sm bg-[#990024]"></span>
-          <span className="font-medium text-slate-600">New Tickets</span>
+          <span className="font-medium text-slate-600">Created</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span>
           <span className="font-medium text-slate-600">Resolved</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-sm bg-zinc-500"></span>
+          <span className="font-medium text-slate-600">Closed</span>
         </div>
       </div>
     </div>
@@ -80,7 +94,7 @@ export const TicketTrendsChart = ({ data }) => (
           <Tooltip content={<CustomTooltip />} />
           <Area 
             type="monotone" 
-            dataKey="tickets" 
+            dataKey="created"
             stroke="#990024" 
             strokeWidth={2.5} 
             fillOpacity={1} 
@@ -93,6 +107,14 @@ export const TicketTrendsChart = ({ data }) => (
             strokeWidth={2} 
             fillOpacity={1} 
             fill="url(#bklitEmerald)" 
+          />
+          <Area
+            type="monotone"
+            dataKey="closed"
+            stroke="#71717a"
+            strokeWidth={2}
+            fill="#71717a"
+            fillOpacity={0.08}
           />
         </AreaChart>
       </ResponsiveContainer>

@@ -8,7 +8,7 @@ Before you begin, ensure you have the following installed:
 
 | Requirement | Minimum Version | Recommended |
 |-------------|-----------------|-------------|
-| Node.js | 20.x | 22.x |
+| Node.js | 20.19+ (22.12+ for Vite 8) | 22.12+ |
 | npm | 9.x | 10.x |
 | PostgreSQL | 14.x | 16.x |
 | Git | 2.x | Latest |
@@ -20,27 +20,19 @@ git clone https://github.com/Felix273/kuccps-ticketing-system.git
 cd kuccps-ticketing
 ```
 
-## Step 2: Install Root Dependencies
-
-```bash
-npm install
-```
-
-This installs shared development dependencies like Vite, ESLint, and Tailwind CSS.
-
-## Step 3: Install Backend Dependencies
+## Step 2: Install Backend Dependencies
 
 ```bash
 cd backend
-npm install
+npm ci
 cd ..
 ```
 
-## Step 4: Install Frontend Dependencies
+## Step 3: Install Frontend Dependencies
 
 ```bash
 cd frontend
-npm install
+npm ci
 cd ..
 ```
 
@@ -90,8 +82,7 @@ kuccps-ticketing/
 ├── google-addon/
 │   ├── Code.gs
 │   └── appsscript.json
-├── package.json
-└── vite.config.js
+└── PROJECT_PRESENTATION.md
 ```
 
 ## Next Steps

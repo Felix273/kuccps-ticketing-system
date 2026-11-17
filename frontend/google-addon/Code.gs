@@ -4,8 +4,8 @@
  */
 
 const DEFAULT_CONFIG = {
-  API_URL: 'https://buffer-utilities-salary-assigned.trycloudflare.com/api/public/tickets',
-  SUPPORT_EMAIL: 'emmanuel.kitanga@kuccps.ac.ke',
+  API_URL: '',
+  SUPPORT_EMAIL: 'itsupport@kuccps.ac.ke',
   BACKEND_API_KEY: ''
 };
 
@@ -36,9 +36,12 @@ function onComposeOpen() {
 
 function getConfig() {
   const properties = PropertiesService.getScriptProperties();
+  const apiBaseUrl = (cleanProperty(properties.getProperty('API_URL')) || DEFAULT_CONFIG.API_URL)
+    .replace(/\/public\/tickets\/?$/i, '')
+    .replace(/\/+$/, '');
 
   return {
-    API_URL: cleanProperty(properties.getProperty('API_URL')) || DEFAULT_CONFIG.API_URL,
+    API_URL: apiBaseUrl ? apiBaseUrl + '/public/tickets' : '',
     SUPPORT_EMAIL: cleanProperty(properties.getProperty('SUPPORT_EMAIL')) || DEFAULT_CONFIG.SUPPORT_EMAIL,
     BACKEND_API_KEY: cleanProperty(properties.getProperty('BACKEND_API_KEY')) || DEFAULT_CONFIG.BACKEND_API_KEY
   };
@@ -49,7 +52,6 @@ function setupProductionProperties() {
   const existing = properties.getProperties();
   const values = {};
 
-  if (!existing.API_URL) values.API_URL = DEFAULT_CONFIG.API_URL;
   if (!existing.SUPPORT_EMAIL) values.SUPPORT_EMAIL = DEFAULT_CONFIG.SUPPORT_EMAIL;
 
   if (Object.keys(values).length > 0) {
@@ -173,8 +175,11 @@ function submitTicket(e) {
 
 function submitToBackend(ticketData, config) {
   try {
-    if (!/^https?:\/\//i.test(config.API_URL)) {
+    if (!/^https:\/\//i.test(config.API_URL)) {
       throw new Error('Backend URL is invalid. Check API_URL in Script Properties.');
+    }
+    if (!config.BACKEND_API_KEY) {
+      throw new Error('Set BACKEND_API_KEY in Script Properties before using ticket intake.');
     }
 
     const headers = {};
@@ -196,9 +201,7 @@ function submitToBackend(ticketData, config) {
     const statusCode = response.getResponseCode();
     const responseText = response.getContentText();
 
-    Logger.log('Backend URL: ' + config.API_URL);
     Logger.log('Backend status: ' + statusCode);
-    Logger.log('Backend response: ' + responseText);
 
     let parsed;
     try {
@@ -206,7 +209,7 @@ function submitToBackend(ticketData, config) {
     } catch (parseError) {
       return {
         success: false,
-        message: 'Backend returned HTTP ' + statusCode + ': ' + responseText.slice(0, 160)
+        message: 'Backend returned an unreadable response (HTTP ' + statusCode + ').'
       };
     }
 

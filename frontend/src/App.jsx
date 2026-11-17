@@ -22,6 +22,7 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(Boolean(initialUser && initialToken));
   const [currentUser, setCurrentUser] = useState(initialUser && initialToken ? initialUser : null);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [dashboardTicketFilter, setDashboardTicketFilter] = useState(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const { tickets, isLoading: ticketsLoading, error: ticketsError, fetchTickets } = useTickets(isAuthenticated);
@@ -145,6 +146,10 @@ function App() {
               statistics={statistics}
               isLoading={statsLoading}
               error={ticketsError}
+              onViewTickets={filter => {
+                setDashboardTicketFilter(filter);
+                setActiveTab('tickets');
+              }}
             />
           )}
           {activeTab === 'tickets' && (
@@ -153,6 +158,8 @@ function App() {
               isLoading={ticketsLoading}
               error={ticketsError}
               onRefresh={fetchTickets}
+              dashboardFilter={dashboardTicketFilter}
+              onClearDashboardFilter={() => setDashboardTicketFilter(null)}
             />
           )}
           {activeTab === 'departments' && (

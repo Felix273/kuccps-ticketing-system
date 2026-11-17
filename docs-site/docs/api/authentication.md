@@ -12,8 +12,8 @@ POST /api/auth/login
 
 ```json
 {
-  "username": "admin",
-  "password": "admin123"
+  "username": "<your-username>",
+  "password": "<your-password>"
 }
 ```
 

@@ -1,8 +1,17 @@
 const { PrismaClient } = require('@prisma/client');
 const { clearSettingsCache } = require('../services/emailService');
 const { SETTINGS_FIELD_SECTIONS } = require('../services/accessControlService');
+const { parseDelimitedValues } = require('../services/normalizedValues');
+const { getDefaultAllowedFileTypesRelation } = require('../services/systemSettingsDefaults');
 
 const prisma = new PrismaClient();
+
+function serializeSettings(settings) {
+  return {
+    ...settings,
+    allowedFileTypes: settings.allowedFileTypes.map(({ extension }) => extension).join(',')
+  };
+}
 
 function getSafeSettings(settings, sections) {
   const safeSettings = Object.fromEntries(
@@ -18,6 +27,7 @@ function getSafeSettings(settings, sections) {
 
 function getInitialEmailSettings() {
   return {
+    allowedFileTypes: getDefaultAllowedFileTypesRelation(),
     smtpHost: process.env.SMTP_HOST || process.env.EMAIL_SMTP_HOST || 'smtp.gmail.com',
     smtpPort: parseInt(process.env.SMTP_PORT || process.env.EMAIL_SMTP_PORT, 10) || 587,
     smtpSecure: String(process.env.SMTP_SECURE || process.env.EMAIL_SMTP_SECURE || '').toLowerCase() === 'true',
@@ -54,15 +64,18 @@ function getInitialEmailSettings() {
 exports.getSettings = async (req, res) => {
   try {
     const section = req.query.section;
-    let settings = await prisma.systemSettings.findFirst();
+    let settings = await prisma.systemSettings.findFirst({
+      include: { allowedFileTypes: true }
+    });
 
     if (!settings) {
       settings = await prisma.systemSettings.create({
-        data: getInitialEmailSettings()
+        data: getInitialEmailSettings(),
+        include: { allowedFileTypes: true }
       });
     }
 
-    const safeSettings = getSafeSettings(settings, new Set([section]));
+    const safeSettings = getSafeSettings(serializeSettings(settings), new Set([section]));
 
     res.json({ success: true, settings: safeSettings });
   } catch (error) {
@@ -131,11 +144,14 @@ exports.updateSettings = async (req, res) => {
       contrastMode
     } = req.body;
 
-    let settings = await prisma.systemSettings.findFirst();
+    let settings = await prisma.systemSettings.findFirst({
+      include: { allowedFileTypes: true }
+    });
 
     if (!settings) {
       settings = await prisma.systemSettings.create({
-        data: getInitialEmailSettings()
+        data: getInitialEmailSettings(),
+        include: { allowedFileTypes: true }
       });
     }
 
@@ -196,19 +212,41 @@ exports.updateSettings = async (req, res) => {
     if (googleAddonApiUrl !== undefined) updateData.googleAddonApiUrl = googleAddonApiUrl;
     if (googleAddonEnabled !== undefined) updateData.googleAddonEnabled = googleAddonEnabled;
     if (maxFileSize !== undefined) updateData.maxFileSize = maxFileSize;
-    if (allowedFileTypes !== undefined) updateData.allowedFileTypes = allowedFileTypes;
     if (maintenanceMode !== undefined) updateData.maintenanceMode = maintenanceMode;
     if (maintenanceMessage !== undefined) updateData.maintenanceMessage = maintenanceMessage;
     if (darkModeEnabled !== undefined) updateData.darkModeEnabled = darkModeEnabled;
     if (contrastMode !== undefined) updateData.contrastMode = contrastMode;
 
-    const updated = await prisma.systemSettings.update({
-      where: { id: settings.id },
-      data: updateData
+    const updated = await prisma.$transaction(async transaction => {
+      await transaction.systemSettings.update({
+        where: { id: settings.id },
+        data: updateData
+      });
+
+      if (allowedFileTypes !== undefined) {
+        const extensions = parseDelimitedValues(allowedFileTypes)
+          .map(extension => extension.toLowerCase());
+        await transaction.systemSettingsAllowedFileType.deleteMany({
+          where: { systemSettingsId: settings.id }
+        });
+        if (extensions.length) {
+          await transaction.systemSettingsAllowedFileType.createMany({
+            data: extensions.map(extension => ({
+              systemSettingsId: settings.id,
+              extension
+            }))
+          });
+        }
+      }
+
+      return transaction.systemSettings.findUnique({
+        where: { id: settings.id },
+        include: { allowedFileTypes: true }
+      });
     });
 
     const sections = new Set(Object.keys(req.body).map(key => SETTINGS_FIELD_SECTIONS[key]));
-    const safeSettings = getSafeSettings(updated, sections);
+    const safeSettings = getSafeSettings(serializeSettings(updated), sections);
 
     clearSettingsCache();
 
@@ -225,7 +263,9 @@ exports.getPublicSettings = async (req, res) => {
 
     if (!settings) {
       settings = await prisma.systemSettings.create({
-        data: {}
+        data: {
+          allowedFileTypes: getDefaultAllowedFileTypesRelation()
+        }
       });
     }
 

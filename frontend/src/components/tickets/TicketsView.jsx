@@ -26,7 +26,14 @@ import { exportToCSV, exportToExcel } from '../../utils/exportUtils';
 import { authService } from '../../services/authService';
 import { PRIORITY_LEVELS, TICKET_STATUS, normalizePriority } from '../../utils/constants';
 
-export const TicketsView = ({ tickets = [], isLoading, error, onRefresh }) => {
+export const TicketsView = ({
+  tickets = [],
+  isLoading,
+  error,
+  onRefresh,
+  dashboardFilter,
+  onClearDashboardFilter
+}) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterPriority, setFilterPriority] = useState('all');
@@ -49,7 +56,7 @@ export const TicketsView = ({ tickets = [], isLoading, error, onRefresh }) => {
   // Reset page when criteria changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, filterStatus, filterPriority, filterDepartment, filterAssignedTo, activeSegment, advancedFilters]);
+  }, [searchQuery, filterStatus, filterPriority, filterDepartment, filterAssignedTo, activeSegment, advancedFilters, dashboardFilter]);
 
   // Segment Tab Counts
   const segmentCounts = useMemo(() => {
@@ -67,6 +74,10 @@ export const TicketsView = ({ tickets = [], isLoading, error, onRefresh }) => {
 
   const filteredTickets = useMemo(() => {
     let result = [...tickets];
+    if (dashboardFilter) {
+      const selectedTicketIds = new Set(dashboardFilter.ticketIds);
+      result = result.filter(ticket => selectedTicketIds.has(ticket.id));
+    }
 
     // Segment Filter
     if (activeSegment === 'unassigned') {
@@ -121,7 +132,7 @@ export const TicketsView = ({ tickets = [], isLoading, error, onRefresh }) => {
     }
 
     return result;
-  }, [tickets, activeSegment, advancedFilters, searchQuery, filterStatus, filterPriority, filterDepartment, filterAssignedTo, currentUser?.id]);
+  }, [tickets, dashboardFilter, activeSegment, advancedFilters, searchQuery, filterStatus, filterPriority, filterDepartment, filterAssignedTo, currentUser?.id]);
 
   const totalItems = filteredTickets.length;
   const totalPages = Math.ceil(totalItems / itemsPerPage);
@@ -244,6 +255,20 @@ export const TicketsView = ({ tickets = [], isLoading, error, onRefresh }) => {
 
   return (
     <div className="space-y-4">
+      {dashboardFilter && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border border-[#990024]/20 bg-white px-4 py-2.5 text-sm">
+          <p className="text-zinc-700">
+            Showing <strong>{totalItems}</strong> tickets for <strong>{dashboardFilter.label}</strong>
+          </p>
+          <button
+            type="button"
+            onClick={onClearDashboardFilter}
+            className="text-xs font-semibold text-[#990024] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#990024]"
+          >
+            Clear metric filter
+          </button>
+        </div>
+      )}
 
       {/* UNIFIED WORKBENCH CONTAINER */}
       <div className="border border-zinc-200 bg-white">

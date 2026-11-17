@@ -1,5 +1,16 @@
 const crypto = require('crypto');
 const memoryBuckets = new Map();
+const MAX_RATE_LIMIT_BUCKETS = 50000;
+const RATE_LIMIT_BUCKET_SWEEP_INTERVAL_MS = 60000;
+let nextRateLimitBucketSweep = 0;
+
+function sweepExpiredRateLimitBuckets(now) {
+  if (now < nextRateLimitBucketSweep) return;
+  for (const [key, bucket] of memoryBuckets) {
+    if (bucket.resetAt <= now) memoryBuckets.delete(key);
+  }
+  nextRateLimitBucketSweep = now + RATE_LIMIT_BUCKET_SWEEP_INTERVAL_MS;
+}
 
 function requestId(req, res, next) {
   req.id = req.headers['x-request-id'] || crypto.randomUUID();
@@ -27,9 +38,24 @@ function getClientIp(req) {
 function rateLimit({ windowMs, max, keyPrefix, message }) {
   return (req, res, next) => {
     const now = Date.now();
+    sweepExpiredRateLimitBuckets(now);
     const ip = getClientIp(req);
     const key = `${keyPrefix}:${ip}`;
-    const bucket = memoryBuckets.get(key) || { count: 0, resetAt: now + windowMs };
+    let bucket = memoryBuckets.get(key);
+
+    if (!bucket) {
+      if (memoryBuckets.size >= MAX_RATE_LIMIT_BUCKETS) {
+        res.setHeader('RateLimit-Limit', String(max));
+        res.setHeader('RateLimit-Remaining', '0');
+        res.setHeader('RateLimit-Reset', String(Math.ceil((now + windowMs) / 1000)));
+        return res.status(429).json({
+          success: false,
+          message: message || 'Too many requests. Please try again later.'
+        });
+      }
+      bucket = { count: 0, resetAt: now + windowMs };
+      memoryBuckets.set(key, bucket);
+    }
 
     if (bucket.resetAt <= now) {
       bucket.count = 0;
@@ -37,7 +63,6 @@ function rateLimit({ windowMs, max, keyPrefix, message }) {
     }
 
     bucket.count += 1;
-    memoryBuckets.set(key, bucket);
 
     res.setHeader('RateLimit-Limit', String(max));
     res.setHeader('RateLimit-Remaining', String(Math.max(0, max - bucket.count)));
@@ -56,6 +81,12 @@ function rateLimit({ windowMs, max, keyPrefix, message }) {
 
 function cleanSecret(value) {
   return String(value || '').trim().replace(/^['"]|['"]$/g, '');
+}
+
+function isStrongProductionSecret(value) {
+  const secret = cleanSecret(value);
+  const placeholderPattern = /change[-_ ]?this|change[-_ ]?me|replace[-_ ]?me|your[-_ ]|example|placeholder|development|password|test/i;
+  return secret.length >= 32 && new Set(secret).size >= 12 && !placeholderPattern.test(secret);
 }
 
 function timingSafeEqualText(a, b) {
@@ -100,26 +131,55 @@ function requirePublicApiKey(req, res, next) {
 }
 
 function validateProductionConfig() {
-  if (process.env.NODE_ENV !== 'production') return;
-
-  const failures = [];
-  const jwtSecret = cleanSecret(process.env.JWT_SECRET);
-  const publicTicketKey = cleanSecret(process.env.PUBLIC_TICKET_API_KEY || process.env.BACKEND_API_KEY);
-  const corsOrigins = cleanSecret(process.env.CORS_ORIGINS || process.env.FRONTEND_URL);
-
-  if (jwtSecret.length < 32) failures.push('JWT_SECRET must be at least 32 characters in production.');
-  if (publicTicketKey.length < 32) failures.push('PUBLIC_TICKET_API_KEY must be at least 32 characters in production.');
-  if (process.env.REQUIRE_PUBLIC_TICKET_API_KEY !== 'true') failures.push('REQUIRE_PUBLIC_TICKET_API_KEY must be true in production.');
-  if (!corsOrigins || corsOrigins.includes('*') || corsOrigins.includes('localhost')) {
-    failures.push('CORS_ORIGINS/FRONTEND_URL must be an explicit production origin.');
-  }
-  if (String(process.env.LDAP_URL || '').startsWith('ldap://')) {
-    failures.push('Use LDAPS for production Active Directory connections.');
-  }
+  const failures = getProductionConfigErrors();
 
   if (failures.length > 0) {
     throw new Error(`Production configuration is not safe:\n- ${failures.join('\n- ')}`);
   }
+}
+
+function getProductionConfigErrors(env = process.env) {
+  if (env.NODE_ENV !== 'production') return [];
+
+  const failures = [];
+  const jwtSecret = cleanSecret(env.JWT_SECRET);
+  const publicTicketKey = cleanSecret(env.PUBLIC_TICKET_API_KEY || env.BACKEND_API_KEY);
+  const configuredOrigins = cleanSecret(env.CORS_ORIGINS || env.FRONTEND_URL);
+  const origins = configuredOrigins.split(',').map(origin => origin.trim()).filter(Boolean);
+
+  if (!isStrongProductionSecret(jwtSecret)) {
+    failures.push('JWT_SECRET must be a high-entropy random value of at least 32 characters in production.');
+  }
+  if (!isStrongProductionSecret(publicTicketKey)) {
+    failures.push('PUBLIC_TICKET_API_KEY must be a high-entropy random value of at least 32 characters in production.');
+  }
+  if (env.REQUIRE_PUBLIC_TICKET_API_KEY !== 'true') failures.push('REQUIRE_PUBLIC_TICKET_API_KEY must be true in production.');
+  if (!origins.length) {
+    failures.push('CORS_ORIGINS/FRONTEND_URL must contain at least one production HTTPS origin.');
+  } else {
+    for (const origin of origins) {
+      try {
+        const parsed = new URL(origin);
+        if (
+          parsed.protocol !== 'https:' ||
+          parsed.origin !== origin ||
+          parsed.username ||
+          parsed.password
+        ) {
+          failures.push('CORS_ORIGINS/FRONTEND_URL entries must be HTTPS origins without paths or credentials.');
+          break;
+        }
+      } catch {
+        failures.push('CORS_ORIGINS/FRONTEND_URL must contain valid HTTPS origins.');
+        break;
+      }
+    }
+  }
+  if (String(env.LDAP_URL || '').startsWith('ldap://')) {
+    failures.push('Use LDAPS for production Active Directory connections.');
+  }
+
+  return failures;
 }
 
 function redact(value) {
@@ -145,6 +205,7 @@ module.exports = {
   securityHeaders,
   rateLimit,
   requirePublicApiKey,
+  getProductionConfigErrors,
   validateProductionConfig,
   auditLog
 };

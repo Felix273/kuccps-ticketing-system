@@ -188,36 +188,37 @@ export const LoginPage = ({ onLogin, onBack }) => {
           </p>
         </div>
 
-        {/* Collapsible Local Demo Credentials */}
-        <div className="mt-4 pt-3 border-t border-dashed border-gray-200">
-          <button
-            type="button"
-            onClick={() => setShowDemoCreds(!showDemoCreds)}
-            className="w-full flex items-center justify-between text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <span>Developer Test Accounts</span>
-            {showDemoCreds ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </button>
+        {import.meta.env.DEV && (
+          <div className="mt-4 pt-3 border-t border-dashed border-gray-200">
+            <button
+              type="button"
+              onClick={() => setShowDemoCreds(!showDemoCreds)}
+              className="w-full flex items-center justify-between text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <span>Developer Test Accounts</span>
+              {showDemoCreds ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
 
-          {showDemoCreds && (
-            <div className="mt-2.5 p-2.5 bg-gray-50 rounded-lg text-[11px] space-y-1.5 text-gray-600">
-              <div 
-                onClick={() => fillCredentials('admin', 'admin123')}
-                className="flex justify-between items-center p-1 rounded hover:bg-gray-100 cursor-pointer transition-colors"
-              >
-                <span>Admin: <strong className="text-gray-800">admin</strong></span>
-                <span className="text-[10px] text-[#990024] font-semibold">Click to fill</span>
+            {showDemoCreds && (
+              <div className="mt-2.5 p-2.5 bg-gray-50 rounded-lg text-[11px] space-y-1.5 text-gray-600">
+                <div
+                  onClick={() => fillCredentials('admin', 'admin123')}
+                  className="flex justify-between items-center p-1 rounded hover:bg-gray-100 cursor-pointer transition-colors"
+                >
+                  <span>Admin: <strong className="text-gray-800">admin</strong></span>
+                  <span className="text-[10px] text-[#990024] font-semibold">Click to fill</span>
+                </div>
+                <div
+                  onClick={() => fillCredentials('itstaff', 'staff123')}
+                  className="flex justify-between items-center p-1 rounded hover:bg-gray-100 cursor-pointer transition-colors"
+                >
+                  <span>Staff: <strong className="text-gray-800">itstaff</strong></span>
+                  <span className="text-[10px] text-[#990024] font-semibold">Click to fill</span>
+                </div>
               </div>
-              <div 
-                onClick={() => fillCredentials('itstaff', 'staff123')}
-                className="flex justify-between items-center p-1 rounded hover:bg-gray-100 cursor-pointer transition-colors"
-              >
-                <span>Staff: <strong className="text-gray-800">itstaff</strong></span>
-                <span className="text-[10px] text-[#990024] font-semibold">Click to fill</span>
-              </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

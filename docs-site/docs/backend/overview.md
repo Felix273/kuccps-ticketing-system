@@ -6,7 +6,7 @@ The backend is a Node.js + Express 5 REST API that powers the KUCCPS IT Ticketin
 
 | Aspect | Detail |
 |--------|--------|
-| Runtime | Node.js 20+ |
+| Runtime | Node.js 20.19+ for development; 22+ in production |
 | Framework | Express 5 |
 | ORM | Prisma 5 |
 | Database | PostgreSQL 14+ |

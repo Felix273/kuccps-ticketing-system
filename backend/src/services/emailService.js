@@ -4,12 +4,18 @@ const Imap = require('imap');
 const cron = require('node-cron');
 const { PrismaClient } = require('@prisma/client');
 const { getConfiguredTicketSlaDeadlines, getTicketSlaChecks } = require('./slaService');
-const { createCsatLinks, renderCsatLinks } = require('./csatService');
+const { getDefaultAllowedFileTypesRelation } = require('./systemSettingsDefaults');
+const {
+  ensureWorkingCsatLinks,
+  removeLegacyCsatSection,
+  renderCsatLinks
+} = require('./csatService');
 
 const prisma = new PrismaClient();
 
 function getInitialEmailSettings() {
   return {
+    allowedFileTypes: getDefaultAllowedFileTypesRelation(),
     smtpHost: process.env.SMTP_HOST || process.env.EMAIL_SMTP_HOST || 'smtp.gmail.com',
     smtpPort: parseInt(process.env.SMTP_PORT || process.env.EMAIL_SMTP_PORT, 10) || 587,
     smtpSecure: String(process.env.SMTP_SECURE || process.env.EMAIL_SMTP_SECURE || '').toLowerCase() === 'true',
@@ -148,6 +154,9 @@ async function sendEmail(to, templateType, data) {
     // Replace placeholders in subject and html
     let subject = template.subject;
     let html = template.html;
+    if (templateType === 'ticketResolved') {
+      html = removeLegacyCsatSection(html);
+    }
 
     // Replace common placeholders. Support both legacy [PLACEHOLDER] tokens and
     // the newer {{camelCase}} template tokens used by the admin reset defaults.
@@ -248,38 +257,6 @@ async function sendTicketReply(ticket, comment) {
     comment,
     emailMessageId: ticket.emailMessageId
   });
-}
-
-function ensureWorkingCsatLinks(html, ticket, primaryColor) {
-  const links = new Map(createCsatLinks(ticket).map(link => [link.rating, link.url]));
-  const linkedRatings = new Set();
-  const rewrittenHtml = html.replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (anchor, attributes, contents) => {
-    const text = contents.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ');
-    const ratingMatch = text.match(/\b([1-5])\s+Stars?\b/i);
-    if (!ratingMatch) return anchor;
-
-    const rating = Number(ratingMatch[1]);
-    linkedRatings.add(rating);
-    const safeAttributes = attributes.replace(/\s+href\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/i, '');
-    return `<a${safeAttributes} href="${links.get(rating)}">${contents}</a>`;
-  });
-
-  if ([1, 2, 3, 4, 5].every(rating => linkedRatings.has(rating))) {
-    return rewrittenHtml;
-  }
-
-  const generatedLinks = renderCsatLinks(ticket, primaryColor);
-  if (rewrittenHtml.includes('{{csatLinks}}')) {
-    return rewrittenHtml.replace('{{csatLinks}}', generatedLinks);
-  }
-
-  const footerStart = rewrittenHtml.search(/<div\b[^>]*>\s*<p\b[^>]*>\s*©/i);
-  if (footerStart >= 0) {
-    return `${rewrittenHtml.slice(0, footerStart)}${generatedLinks}${rewrittenHtml.slice(footerStart)}`;
-  }
-  const lastClosingDiv = rewrittenHtml.lastIndexOf('</div>');
-  if (lastClosingDiv < 0) return `${rewrittenHtml}${generatedLinks}`;
-  return `${rewrittenHtml.slice(0, lastClosingDiv)}${generatedLinks}${rewrittenHtml.slice(lastClosingDiv)}`;
 }
 
 // Generate ticket number in format from settings

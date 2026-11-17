@@ -1,10 +1,13 @@
 const { PrismaClient } = require('@prisma/client');
-const { verifyCsatToken } = require('../services/csatService');
 const {
-  SLA_CATEGORIES,
+  CSAT_SATISFIED_MIN_RATING,
+  calculateSatisfactionRate,
+  createCsatLinks,
+  verifyCsatToken
+} = require('../services/csatService');
+const {
   SLA_DEFAULT_POLICIES,
   calculateSlaCompliance,
-  buildSlaCategoryIssues,
   getActiveOverdueDeadline,
   isActiveTicketOverdue,
   resetSlaPoliciesToDefaults,
@@ -493,7 +496,33 @@ exports.createPublicCsatResponse = async (req, res) => {
         userId: requester?.id || null
       }
     });
-    res.status(200).json({ success: true, response });
+
+    // Automatically transition ticket status from 'Resolved' to 'Closed'
+    await prisma.ticket.update({
+      where: { id: ticket.id },
+      data: {
+        status: 'Closed',
+        closedAt: new Date()
+      }
+    });
+
+    // Record in TicketHistory audit log
+    await prisma.ticketHistory.create({
+      data: {
+        ticketId: ticket.id,
+        field: 'status',
+        oldValue: ticket.status,
+        newValue: 'Closed',
+        changedBy: requester?.id || 'Requester (CSAT)'
+      }
+    });
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Ticket closed and feedback recorded.', 
+      response, 
+      ticketStatus: 'Closed' 
+    });
   } catch (error) {
     console.error('Create public CSAT response error:', error);
     res.status(500).json({ success: false, message: 'Failed to save your feedback' });
@@ -510,38 +539,16 @@ exports.handleEmailCsatRate = async (req, res) => {
 
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },
-      select: { id: true, ticketNumber: true, subject: true, status: true }
+      select: { id: true, ticketNumber: true, requesterEmail: true, status: true }
     });
     if (!ticket) return res.status(404).send('<h2>Ticket not found</h2>');
     if (!RESOLVED_STATUSES.has(ticket.status)) {
       return res.status(409).send('<h2>Feedback is available after a ticket is resolved</h2>');
     }
 
-    const existing = await prisma.csatResponse.findFirst({ where: { ticketId } });
-    if (existing) {
-      await prisma.csatResponse.update({
-        where: { id: existing.id },
-        data: { rating: numericRating }
-      });
-    } else {
-      await prisma.csatResponse.create({
-        data: { ticketId, rating: numericRating }
-      });
-    }
-
-    res.type('html').send(`
-      <!DOCTYPE html>
-      <html lang="en">
-        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Feedback received</title></head>
-        <body style="font-family:Arial,sans-serif;background:#f3f4f6;margin:0;padding:40px 20px;text-align:center">
-          <main style="max-width:520px;margin:0 auto;background:white;border-radius:12px;padding:32px">
-            <h1>KUCCPS IT Support</h1>
-            <p>Your ${numericRating}-star rating for ticket <strong>${escapeHtml(ticket.ticketNumber)}</strong> has been recorded.</p>
-            <p>${escapeHtml(ticket.subject)}</p>
-          </main>
-        </body>
-      </html>
-    `);
+    const feedbackLink = createCsatLinks(ticket).find(link => link.rating === numericRating);
+    if (!feedbackLink) throw new Error('Unable to generate a CSAT link for the selected rating');
+    res.redirect(303, feedbackLink.url);
   } catch (error) {
     console.error('Handle email CSAT rate error:', error);
     res.status(500).send('<h2>Failed to record rating</h2>');
@@ -561,7 +568,10 @@ exports.getDashboardAnalytics = async (req, res) => {
       ...(agentId ? { assignedToId: agentId } : {})
     };
 
-    const [total, open, inProgress, onHold, resolved, closed, csat, tickets, users, categoryGroups, slaTickets] = await Promise.all([
+    const [
+      total, open, inProgress, onHold, resolved, closed,
+      csat, csatSatisfiedCount, csatResponses, tickets, users, categoryGroups, slaTickets
+    ] = await Promise.all([
       prisma.ticket.count({ where: ticketWhere }),
       prisma.ticket.count({ where: { ...ticketWhere, status: 'Open' } }),
       prisma.ticket.count({ where: { ...ticketWhere, status: 'In Progress' } }),
@@ -569,6 +579,11 @@ exports.getDashboardAnalytics = async (req, res) => {
       prisma.ticket.count({ where: { ...ticketWhere, status: 'Resolved' } }),
       prisma.ticket.count({ where: { ...ticketWhere, status: 'Closed' } }),
       prisma.csatResponse.aggregate({ _avg: { rating: true }, _count: { rating: true } }),
+      prisma.csatResponse.count({ where: { rating: { gte: CSAT_SATISFIED_MIN_RATING } } }),
+      prisma.csatResponse.findMany({
+        select: { ticketId: true },
+        distinct: ['ticketId']
+      }),
       prisma.ticket.findMany({
         where: ticketWhere,
         include: {
@@ -584,7 +599,7 @@ exports.getDashboardAnalytics = async (req, res) => {
       }),
       prisma.ticket.groupBy({
         by: ['category'],
-        where: { ...ticketWhere, category: { in: SLA_CATEGORIES } },
+        where: ticketWhere,
         _count: { _all: true }
       }),
       prisma.ticket.findMany({
@@ -607,7 +622,14 @@ exports.getDashboardAnalytics = async (req, res) => {
 
     const aiInsights = buildAiInsights(tickets, users);
     const slaMetrics = calculateSlaCompliance(slaTickets);
-    const categoryIssues = buildSlaCategoryIssues(categoryGroups);
+    const categoryIssues = categoryGroups
+      .map(group => ({
+        name: group.category,
+        count: group._count?._all || 0,
+        percentage: total ? Math.round(((group._count?._all || 0) / total) * 100) : 0
+      }))
+      .sort((left, right) => right.count - left.count);
+    const csatTicketIds = [...new Set(csatResponses.map(response => response.ticketId))];
 
     res.json({
       success: true,
@@ -622,8 +644,10 @@ exports.getDashboardAnalytics = async (req, res) => {
         slaCompliance: slaMetrics.compliance,
         slaTargetAttainment: slaMetrics.targetAttainment,
         categoryIssues,
-        csatScore: csat._avg.rating ? Number(csat._avg.rating.toFixed(2)) : null,
+        csatScore: csat._avg.rating == null ? null : Number(csat._avg.rating.toFixed(2)),
         csatResponses: csat._count.rating,
+        csatSatisfactionRate: calculateSatisfactionRate(csat._count.rating, csatSatisfiedCount),
+        csatTicketIds,
         aiInsights
       }
     });

@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { getProductionConfigErrors } = require('../src/middleware/security');
 
 const envPath = path.join(__dirname, '..', '.env');
 const required = ['DATABASE_URL', 'JWT_SECRET'];
@@ -42,12 +43,11 @@ function warn(condition, message) {
   if (!condition) warnings.push(message);
 }
 
-if (!fs.existsSync(envPath)) {
-  console.error('Preflight failed: backend/.env was not found.');
-  process.exit(1);
-}
-
-const { values, counts } = parseEnv(fs.readFileSync(envPath, 'utf8'));
+const fileConfig = fs.existsSync(envPath)
+  ? parseEnv(fs.readFileSync(envPath, 'utf8'))
+  : { values: {}, counts: {} };
+const values = { ...fileConfig.values, ...process.env };
+const counts = fileConfig.counts;
 
 Object.entries(counts)
   .filter(([, count]) => count > 1)
@@ -55,44 +55,40 @@ Object.entries(counts)
 
 required.forEach(key => check(hasValue(values[key]), `${key} is required.`));
 
-check(
-  hasValue(values.PUBLIC_TICKET_API_KEY) || values.REQUIRE_PUBLIC_TICKET_API_KEY !== 'true',
-  'PUBLIC_TICKET_API_KEY is required when REQUIRE_PUBLIC_TICKET_API_KEY=true.'
-);
-
-if (hasValue(values.PUBLIC_TICKET_API_KEY)) {
-  check(values.PUBLIC_TICKET_API_KEY.length >= 32, 'PUBLIC_TICKET_API_KEY should be at least 32 characters.');
-}
-
-if (hasValue(values.JWT_SECRET)) {
-  check(values.JWT_SECRET.length >= 32, 'JWT_SECRET should be at least 32 characters.');
+if (hasValue(values.DATABASE_URL)) {
+  try {
+    const databaseUrl = new URL(values.DATABASE_URL);
+    check(
+      ['postgres:', 'postgresql:'].includes(databaseUrl.protocol),
+      'DATABASE_URL must use PostgreSQL.'
+    );
+  } catch {
+    failures.push('DATABASE_URL must be a valid PostgreSQL connection URL.');
+  }
 }
 
 if (values.NODE_ENV === 'production') {
-  check(values.REQUIRE_PUBLIC_TICKET_API_KEY === 'true', 'REQUIRE_PUBLIC_TICKET_API_KEY must be true in production.');
-  warn(values.FRONTEND_URL && !values.FRONTEND_URL.includes('localhost'), 'FRONTEND_URL should be the production HTTPS frontend URL.');
-  warn(values.CORS_ORIGINS || values.FRONTEND_URL, 'Set CORS_ORIGINS or FRONTEND_URL for production.');
+  failures.push(...getProductionConfigErrors(values));
   check(values.ALLOW_PUBLIC_API_KEY_IN_BODY !== 'true', 'ALLOW_PUBLIC_API_KEY_IN_BODY must not be true in production.');
   check(!String(values.LDAP_URL || '').startsWith('ldap://'), 'Use LDAPS, not LDAP, in production.');
   check(values.LDAP_TLS_REJECT_UNAUTHORIZED !== 'false', 'LDAP_TLS_REJECT_UNAUTHORIZED must not be false in production.');
   check(values.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false', 'SMTP_TLS_REJECT_UNAUTHORIZED must not be false in production.');
   check(values.IMAP_TLS_REJECT_UNAUTHORIZED !== 'false', 'IMAP_TLS_REJECT_UNAUTHORIZED must not be false in production.');
+  check(Number(process.versions.node.split('.')[0]) >= 22, 'Node.js 22 or newer is required in production.');
 }
 
-warn(!String(values.CORS_ORIGINS || '').includes('*'), 'CORS_ORIGINS should not contain wildcard origins.');
-warn(!String(values.FRONTEND_URL || '').includes('localhost'), 'FRONTEND_URL still points to localhost.');
 warn(hasValue(values.EMAIL_USER) || hasValue(values.SMTP_USER), 'SMTP username is not configured; outbound email may fail.');
 warn(hasValue(values.EMAIL_PASSWORD) || hasValue(values.SMTP_PASSWORD), 'SMTP password/app password is not configured; outbound email may fail.');
 warn(hasValue(values.SUPPORT_EMAIL), 'SUPPORT_EMAIL is not configured; ticket emails may fall back to the SMTP username.');
 
-if (values.USE_LDAP_AUTH === 'true') {
+if (values.USE_LDAP_AUTH === 'true' || values.LDAP_ENABLED === 'true') {
   ['LDAP_URL', 'LDAP_BIND_DN', 'LDAP_BIND_PASSWORD', 'LDAP_BASE_DN'].forEach(key => {
     check(hasValue(values[key]), `${key} is required when USE_LDAP_AUTH=true.`);
   });
 }
 
 const nodeMajor = Number(process.versions.node.split('.')[0]);
-warn(nodeMajor >= 22, `Node ${process.versions.node} is below the recommended production runtime v22.x.`);
+warn(nodeMajor >= 22, `Node ${process.versions.node} is below the required production runtime v22.x.`);
 
 if (failures.length > 0) {
   console.error('Preflight failed:');

@@ -1,12 +1,17 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const multer = require('multer');
 const knowledgeBaseController = require('../controllers/knowledgeBaseController');
 const { authenticateToken, requireAdmin, requireStaffOrAdmin } = require('../middleware/auth');
+const { uploadDir } = require('../services/uploadStorage');
 
 // Strict file validation for officer uploads
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: uploadDir,
+    filename: (req, file, callback) => callback(null, `kb-${crypto.randomUUID()}`)
+  }),
   limits: { fileSize: parseInt(process.env.MAX_KB_UPLOAD_BYTES, 10) || 15 * 1024 * 1024 }, // 15MB limit
   fileFilter: (req, file, cb) => {
     const allowedTypes = new Set([
@@ -42,6 +47,7 @@ router.use(requireStaffOrAdmin);
 router.get('/articles', knowledgeBaseController.getArticles);
 router.get('/articles/:idOrSlug', knowledgeBaseController.getArticle);
 router.get('/articles/:id/revisions', knowledgeBaseController.getRevisions);
+router.get('/articles/:id/attachments/:storageKey', knowledgeBaseController.downloadArticleMaterial);
 
 // Officer Contributions
 router.post('/articles', knowledgeBaseController.createArticle);

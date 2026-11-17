@@ -1,5 +1,37 @@
 const { PrismaClient } = require('@prisma/client');
+const { parseDelimitedValues } = require('../services/normalizedValues');
 const prisma = new PrismaClient();
+
+function parseSystems(value) {
+  return parseDelimitedValues(value).map(name => ({
+    name,
+    normalizedName: name.toLowerCase()
+  }));
+}
+
+function systemRelations(value) {
+  return {
+    create: parseSystems(value).map(({ name, normalizedName }) => ({
+      system: {
+        connectOrCreate: {
+          where: { normalizedName },
+          create: { name, normalizedName }
+        }
+      }
+    }))
+  };
+}
+
+function serializeIssue(issue) {
+  return {
+    ...issue,
+    systems: issue.systems.map(({ system }) => system.name).join(',')
+  };
+}
+
+const issueInclude = {
+  systems: { include: { system: true } }
+};
 
 exports.getIssues = async (req, res) => {
   try {
@@ -10,6 +42,7 @@ exports.getIssues = async (req, res) => {
         ...(req.query.status ? { status: req.query.status } : {})
       },
       include: {
+        ...issueInclude,
         updates: {
           where: isPublic ? { isPublic: true } : {},
           orderBy: { createdAt: 'desc' }
@@ -21,7 +54,7 @@ exports.getIssues = async (req, res) => {
     const activeIssues = issues.filter(issue => !['Completed', 'Resolved'].includes(issue.status));
     res.json({
       success: true,
-      issues,
+      issues: issues.map(serializeIssue),
       summary: {
         active: activeIssues.length,
         allOperational: activeIssues.length === 0
@@ -46,7 +79,7 @@ exports.createIssue = async (req, res) => {
         description,
         status: status || 'Investigating',
         severity: severity || 'Informational',
-        systems: Array.isArray(systems) ? systems.join(',') : (systems || ''),
+        systems: systemRelations(systems),
         isPublic: isPublic !== false,
         updates: {
           create: {
@@ -57,10 +90,10 @@ exports.createIssue = async (req, res) => {
           }
         }
       },
-      include: { updates: true }
+      include: { updates: true, ...issueInclude }
     });
 
-    res.status(201).json({ success: true, issue });
+    res.status(201).json({ success: true, issue: serializeIssue(issue) });
   } catch (error) {
     console.error('Create issue error:', error);
     res.status(500).json({ success: false, message: 'Failed to create status issue' });
@@ -75,7 +108,12 @@ exports.updateIssue = async (req, res) => {
       ...(description !== undefined && { description }),
       ...(status !== undefined && { status }),
       ...(severity !== undefined && { severity }),
-      ...(systems !== undefined && { systems: Array.isArray(systems) ? systems.join(',') : systems }),
+      ...(systems !== undefined && {
+        systems: {
+          deleteMany: {},
+          ...systemRelations(systems)
+        }
+      }),
       ...(isPublic !== undefined && { isPublic })
     };
     if (status && ['Completed', 'Resolved'].includes(status)) data.resolvedAt = new Date();
@@ -84,9 +122,9 @@ exports.updateIssue = async (req, res) => {
     const issue = await prisma.statusIssue.update({
       where: { id: req.params.id },
       data,
-      include: { updates: { orderBy: { createdAt: 'desc' } } }
+      include: { updates: { orderBy: { createdAt: 'desc' } }, ...issueInclude }
     });
-    res.json({ success: true, issue });
+    res.json({ success: true, issue: serializeIssue(issue) });
   } catch (error) {
     console.error('Update issue error:', error);
     res.status(500).json({ success: false, message: 'Failed to update status issue' });

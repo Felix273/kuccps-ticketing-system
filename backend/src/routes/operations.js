@@ -19,7 +19,6 @@ router.put('/sla-policies/:id', authenticateToken, requirePermission('settings.t
 router.get('/csat/public', rateLimit({ windowMs: 15 * 60 * 1000, max: 60, keyPrefix: 'public-csat' }), operationsController.getPublicCsat);
 router.post('/csat/public', rateLimit({ windowMs: 15 * 60 * 1000, max: 20, keyPrefix: 'public-csat-submit' }), operationsController.createPublicCsatResponse);
 router.post('/csat', authenticateToken, operationsController.createCsatResponse);
-router.get('/csat/rate', operationsController.handleEmailCsatRate);
-router.post('/csat/public', operationsController.createPublicCsatResponse);
+router.get('/csat/rate', rateLimit({ windowMs: 15 * 60 * 1000, max: 60, keyPrefix: 'legacy-csat-rate' }), operationsController.handleEmailCsatRate);
 
 module.exports = router;

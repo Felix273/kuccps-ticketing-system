@@ -94,6 +94,7 @@ const sidebars = {
       label: 'Deployment',
       link: { type: 'doc', id: 'deployment/overview' },
       items: [
+        'deployment/almalinux-runbook',
         'deployment/backend',
         'deployment/frontend',
         'deployment/database',

@@ -27,6 +27,8 @@ flowchart TD
 | Database | Supabase, Neon, or managed PostgreSQL | AWS RDS, Google Cloud SQL |
 | Reverse Proxy | Nginx on same VPS as backend | Caddy, Cloudflare Tunnel |
 
+For an AlmaLinux VPS deployment, follow the [AlmaLinux runbook](./almalinux-runbook).
+
 ## Pre-Deployment Checklist
 
 See [Production Checklist](./production-checklist) for the full list.

@@ -1,5 +1,85 @@
 const { PrismaClient } = require('@prisma/client');
+const fs = require('fs');
+const path = require('path');
+const { uploadDir, resolveUploadPath, removeUploadFile } = require('../services/uploadStorage');
+const { parseDelimitedValues } = require('../services/normalizedValues');
 const prisma = new PrismaClient();
+
+const articleRelations = {
+  tags: { include: { tag: true } },
+  relatedFrom: { include: { relatedArticle: { select: { id: true, slug: true } } } },
+  relatedReferences: { select: { reference: true } }
+};
+
+function serializeArticle(article) {
+  if (!article) return article;
+  const serialized = { ...article };
+
+  if (Array.isArray(article.tags)) {
+    serialized.tags = article.tags.map(({ tag }) => tag.name).join(',');
+  }
+  if (Array.isArray(article.relatedFrom) && Array.isArray(article.relatedReferences)) {
+    const related = article.relatedFrom.map(({ relatedArticle }) => relatedArticle.slug || relatedArticle.id);
+    related.push(...article.relatedReferences.map(({ reference }) => reference));
+    serialized.relatedArticles = related.join(',') || null;
+  }
+  delete serialized.relatedFrom;
+  delete serialized.relatedTo;
+  delete serialized.relatedReferences;
+  return serialized;
+}
+
+async function syncArticleCollections(client, articleId, { tags, relatedArticles }) {
+  if (tags !== undefined) {
+    await client.knowledgeArticleTag.deleteMany({ where: { articleId } });
+    for (const name of parseDelimitedValues(tags)) {
+      const normalizedName = name.toLowerCase();
+      const tag = await client.knowledgeTag.upsert({
+        where: { normalizedName },
+        create: { name, normalizedName },
+        update: {}
+      });
+      await client.knowledgeArticleTag.create({ data: { articleId, tagId: tag.id } });
+    }
+  }
+
+  if (relatedArticles !== undefined) {
+    await client.knowledgeArticleRelation.deleteMany({ where: { articleId } });
+    await client.knowledgeArticleRelatedReference.deleteMany({ where: { articleId } });
+    const references = parseDelimitedValues(relatedArticles);
+    if (references.length === 0) return;
+
+    const related = await client.knowledgeArticle.findMany({
+      where: { OR: references.flatMap(reference => [{ id: reference }, { slug: reference }]) },
+      select: { id: true, slug: true }
+    });
+    const relatedByReference = new Map();
+    related.forEach(article => {
+      relatedByReference.set(article.id, article);
+      relatedByReference.set(article.slug, article);
+    });
+    const linkedIds = new Set();
+    for (const reference of references) {
+      const article = relatedByReference.get(reference);
+      if (article && article.id !== articleId) {
+        if (!linkedIds.has(article.id)) {
+          await client.knowledgeArticleRelation.create({
+            data: { articleId, relatedArticleId: article.id }
+          });
+          linkedIds.add(article.id);
+        }
+      } else {
+        await client.knowledgeArticleRelatedReference.create({
+          data: { articleId, reference }
+        });
+      }
+    }
+  }
+}
+
+function serializeArticles(articles) {
+  return articles.map(serializeArticle);
+}
 
 function slugify(value) {
   return String(value || '')
@@ -68,7 +148,7 @@ exports.getArticles = async (req, res) => {
       ...(statusFilter ? { status: statusFilter } : {}),
       ...(category && category !== 'All' ? { category } : {}),
       ...(device && device !== 'All' ? { affectedDevices: { contains: device, mode: 'insensitive' } } : {}),
-      ...(tag ? { tags: { contains: tag, mode: 'insensitive' } } : {})
+      ...(tag ? { tags: { some: { tag: { name: { contains: tag, mode: 'insensitive' } } } } } : {})
     };
 
     // Advanced Typo-Tolerant & Multi-Field Search
@@ -80,7 +160,7 @@ exports.getArticles = async (req, res) => {
         { affectedDevices: { contains: q, mode: 'insensitive' } },
         { cause: { contains: q, mode: 'insensitive' } },
         { resolution: { contains: q, mode: 'insensitive' } },
-        { tags: { contains: q, mode: 'insensitive' } },
+        { tags: { some: { tag: { name: { contains: q, mode: 'insensitive' } } } } },
         { excerpt: { contains: q, mode: 'insensitive' } },
         { content: { contains: q, mode: 'insensitive' } }
       ];
@@ -91,7 +171,7 @@ exports.getArticles = async (req, res) => {
           { title: { contains: token, mode: 'insensitive' } },
           { symptoms: { contains: token, mode: 'insensitive' } },
           { affectedDevices: { contains: token, mode: 'insensitive' } },
-          { tags: { contains: token, mode: 'insensitive' } }
+          { tags: { some: { tag: { name: { contains: token, mode: 'insensitive' } } } } }
         );
       });
 
@@ -100,6 +180,7 @@ exports.getArticles = async (req, res) => {
 
     const articles = await prisma.knowledgeArticle.findMany({
       where,
+      include: articleRelations,
       orderBy: [{ views: 'desc' }, { updatedAt: 'desc' }]
     });
 
@@ -116,7 +197,7 @@ exports.getArticles = async (req, res) => {
       }).catch(err => console.warn('Search log skipped:', err.message));
     }
 
-    res.json({ success: true, count: articles.length, articles });
+    res.json({ success: true, count: articles.length, articles: serializeArticles(articles) });
   } catch (error) {
     console.error('Get articles error:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch articles' });
@@ -135,6 +216,7 @@ exports.getArticle = async (req, res) => {
         ]
       },
       include: {
+        ...articleRelations,
         revisions: {
           orderBy: { version: 'desc' },
           take: 5
@@ -152,7 +234,7 @@ exports.getArticle = async (req, res) => {
       data: { views: { increment: 1 } }
     }).catch(() => null);
 
-    res.json({ success: true, article: { ...article, views: article.views + 1 } });
+    res.json({ success: true, article: serializeArticle({ ...article, views: article.views + 1 }) });
   } catch (error) {
     console.error('Get article error:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch article' });
@@ -209,37 +291,42 @@ ${escalation || 'Escalate to Tier 3 Lead if unresolved after standard procedure.
       slug = `${slug}-${Date.now().toString().slice(-4)}`;
     }
 
-    const article = await prisma.knowledgeArticle.create({
-      data: {
-        title,
-        slug,
-        category,
-        excerpt: excerpt || symptoms?.slice(0, 160) || 'ICT Troubleshooting guide',
-        content: resolvedContent,
-        symptoms: symptoms || null,
-        affectedDevices: affectedDevices || null,
-        cause: cause || null,
-        resolution: resolution || null,
-        escalation: escalation || null,
-        tags: tags || '',
-        status: initialStatus,
-        relatedArticles: relatedArticles || null,
-        authorId: req.user?.id || null,
-        authorName: req.user?.name || 'ICT Officer',
-        authorRole: req.user?.role || 'staff',
-        version: 1,
-        revisions: {
-          create: {
-            version: 1,
-            title,
-            content: resolvedContent,
-            symptoms,
-            resolution,
-            changedBy: req.user?.name || 'ICT Officer',
-            reason: 'Initial creation'
+    const article = await prisma.$transaction(async transaction => {
+      const created = await transaction.knowledgeArticle.create({
+        data: {
+          title,
+          slug,
+          category,
+          excerpt: excerpt || symptoms?.slice(0, 160) || 'ICT Troubleshooting guide',
+          content: resolvedContent,
+          symptoms: symptoms || null,
+          affectedDevices: affectedDevices || null,
+          cause: cause || null,
+          resolution: resolution || null,
+          escalation: escalation || null,
+          status: initialStatus,
+          authorId: req.user?.id || null,
+          authorName: req.user?.name || 'ICT Officer',
+          authorRole: req.user?.role || 'staff',
+          version: 1,
+          revisions: {
+            create: {
+              version: 1,
+              title,
+              content: resolvedContent,
+              symptoms,
+              resolution,
+              changedBy: req.user?.name || 'ICT Officer',
+              reason: 'Initial creation'
+            }
           }
         }
-      }
+      });
+      await syncArticleCollections(transaction, created.id, { tags, relatedArticles });
+      return transaction.knowledgeArticle.findUnique({
+        where: { id: created.id },
+        include: articleRelations
+      });
     });
 
     res.status(201).json({
@@ -247,11 +334,11 @@ ${escalation || 'Escalate to Tier 3 Lead if unresolved after standard procedure.
       message: initialStatus === 'pending_review' 
         ? 'Article submitted successfully and queued for Administrator review.' 
         : 'Article published successfully.',
-      article
+      article: serializeArticle(article)
     });
   } catch (error) {
     console.error('Create article error:', error);
-    res.status(500).json({ success: false, message: error.message || 'Failed to create article' });
+    res.status(500).json({ success: false, message: 'Failed to create article' });
   }
 };
 
@@ -282,6 +369,7 @@ exports.updateArticle = async (req, res) => {
       tags,
       excerpt,
       content,
+      relatedArticles,
       status,
       editReason
     } = req.body;
@@ -289,39 +377,45 @@ exports.updateArticle = async (req, res) => {
     const newVersion = (existing.version || 1) + 1;
 
     // Snapshot existing version before modifying
-    await prisma.knowledgeRevision.create({
-      data: {
-        articleId: existing.id,
-        version: existing.version || 1,
-        title: existing.title,
-        content: existing.content,
-        symptoms: existing.symptoms,
-        resolution: existing.resolution,
-        changedBy: req.user.name,
-        reason: editReason || 'Administrative update'
-      }
+    const updated = await prisma.$transaction(async transaction => {
+      await transaction.knowledgeRevision.create({
+        data: {
+          articleId: existing.id,
+          version: existing.version || 1,
+          title: existing.title,
+          content: existing.content,
+          symptoms: existing.symptoms,
+          resolution: existing.resolution,
+          changedBy: req.user.name,
+          reason: editReason || 'Administrative update'
+        }
+      });
+
+      await transaction.knowledgeArticle.update({
+        where: { id },
+        data: {
+          ...(title ? { title, slug: slugify(title) } : {}),
+          ...(category ? { category } : {}),
+          ...(symptoms !== undefined ? { symptoms } : {}),
+          ...(affectedDevices !== undefined ? { affectedDevices } : {}),
+          ...(cause !== undefined ? { cause } : {}),
+          ...(resolution !== undefined ? { resolution } : {}),
+          ...(escalation !== undefined ? { escalation } : {}),
+          ...(excerpt !== undefined ? { excerpt } : {}),
+          ...(content !== undefined ? { content } : {}),
+          ...(status ? { status } : {}),
+          version: newVersion,
+          updatedAt: new Date()
+        }
+      });
+      await syncArticleCollections(transaction, id, { tags, relatedArticles });
+      return transaction.knowledgeArticle.findUnique({
+        where: { id },
+        include: articleRelations
+      });
     });
 
-    const updated = await prisma.knowledgeArticle.update({
-      where: { id },
-      data: {
-        ...(title ? { title, slug: slugify(title) } : {}),
-        ...(category ? { category } : {}),
-        ...(symptoms !== undefined ? { symptoms } : {}),
-        ...(affectedDevices !== undefined ? { affectedDevices } : {}),
-        ...(cause !== undefined ? { cause } : {}),
-        ...(resolution !== undefined ? { resolution } : {}),
-        ...(escalation !== undefined ? { escalation } : {}),
-        ...(tags !== undefined ? { tags } : {}),
-        ...(excerpt !== undefined ? { excerpt } : {}),
-        ...(content !== undefined ? { content } : {}),
-        ...(status ? { status } : {}),
-        version: newVersion,
-        updatedAt: new Date()
-      }
-    });
-
-    res.json({ success: true, message: 'Article updated and revision logged.', article: updated });
+    res.json({ success: true, message: 'Article updated and revision logged.', article: serializeArticle(updated) });
   } catch (error) {
     console.error('Update article error:', error);
     res.status(500).json({ success: false, message: 'Failed to update article' });
@@ -369,7 +463,7 @@ exports.restoreArticle = async (req, res) => {
     }
 
     const { id } = req.params;
-    const restored = await prisma.knowledgeArticle.update({
+    await prisma.knowledgeArticle.update({
       where: { id },
       data: {
         isArchived: false,
@@ -377,8 +471,12 @@ exports.restoreArticle = async (req, res) => {
         deletedAt: null
       }
     });
+    const restored = await prisma.knowledgeArticle.findUnique({
+      where: { id },
+      include: articleRelations
+    });
 
-    res.json({ success: true, message: 'Article restored to published status.', article: restored });
+    res.json({ success: true, message: 'Article restored to published status.', article: serializeArticle(restored) });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to restore article' });
   }
@@ -392,7 +490,7 @@ exports.approveArticle = async (req, res) => {
     }
 
     const { id } = req.params;
-    const approved = await prisma.knowledgeArticle.update({
+    await prisma.knowledgeArticle.update({
       where: { id },
       data: {
         status: 'published',
@@ -400,8 +498,12 @@ exports.approveArticle = async (req, res) => {
         approvedAt: new Date()
       }
     });
+    const approved = await prisma.knowledgeArticle.findUnique({
+      where: { id },
+      include: articleRelations
+    });
 
-    res.json({ success: true, message: 'Article approved and published organization-wide.', article: approved });
+    res.json({ success: true, message: 'Article approved and published organization-wide.', article: serializeArticle(approved) });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to approve article' });
   }
@@ -465,11 +567,15 @@ exports.rateArticle = async (req, res) => {
   try {
     const { id } = req.params;
     const { helpful } = req.body;
-    const updated = await prisma.knowledgeArticle.update({
+    await prisma.knowledgeArticle.update({
       where: { id },
       data: helpful ? { helpful: { increment: 1 } } : { notHelpful: { increment: 1 } }
     });
-    res.json({ success: true, article: updated });
+    const updated = await prisma.knowledgeArticle.findUnique({
+      where: { id },
+      include: articleRelations
+    });
+    res.json({ success: true, article: serializeArticle(updated) });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to rate article' });
   }
@@ -490,10 +596,12 @@ exports.getRevisions = async (req, res) => {
 
 // ── 10. MATERIAL UPLOAD (Officer Documents & Guides) ─────────
 exports.uploadArticleMaterial = async (req, res) => {
+  let uploadedPath;
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
+    uploadedPath = req.file.path;
 
     const { title, category, tags } = req.body;
     const originalName = req.file.originalname;
@@ -503,39 +611,92 @@ exports.uploadArticleMaterial = async (req, res) => {
     let extractedText = '';
     const isText = mimeType.startsWith('text/') || /\.(md|txt|csv|json|log)$/i.test(originalName);
     if (isText) {
-      extractedText = req.file.buffer.toString('utf-8').slice(0, 10000);
+      extractedText = (await fs.promises.readFile(req.file.path, 'utf-8')).slice(0, 10000);
     }
 
     const resolvedTitle = title || originalName.replace(/\.[^/.]+$/, '');
     const slug = `${slugify(resolvedTitle)}-${Date.now().toString().slice(-4)}`;
 
-    const article = await prisma.knowledgeArticle.create({
-      data: {
-        title: resolvedTitle,
-        slug,
-        category: category || 'Hardware & Peripherals',
-        tags: tags || 'uploaded-material',
-        excerpt: `Document guide: ${originalName} (${Math.round(size / 1024)} KB)`,
-        content: extractedText || `Technical documentation attachment: **${originalName}**\n\nUploaded by ICT Officer: ${req.user?.name || 'Staff'}.`,
-        affectedDevices: 'Document Attachment',
-        resolution: 'Download and review attached technical documentation.',
-        attachments: [{
-          name: originalName,
-          size,
-          mimeType,
-          uploadedAt: new Date()
-        }],
-        status: req.user?.role === 'admin' ? 'published' : 'pending_review',
-        authorId: req.user?.id || null,
-        authorName: req.user?.name || 'ICT Officer',
-        authorRole: req.user?.role || 'staff'
-      }
+    const article = await prisma.$transaction(async transaction => {
+      const created = await transaction.knowledgeArticle.create({
+        data: {
+          title: resolvedTitle,
+          slug,
+          category: category || 'Hardware & Peripherals',
+          excerpt: `Document guide: ${originalName} (${Math.round(size / 1024)} KB)`,
+          content: extractedText || `Technical documentation attachment: **${originalName}**\n\nUploaded by ICT Officer: ${req.user?.name || 'Staff'}.`,
+          affectedDevices: 'Document Attachment',
+          resolution: 'Download and review attached technical documentation.',
+          attachments: [{
+            name: originalName,
+            size,
+            mimeType,
+            storageKey: req.file.filename,
+            uploadedAt: new Date()
+          }],
+          status: req.user?.role === 'admin' ? 'published' : 'pending_review',
+          authorId: req.user?.id || null,
+          authorName: req.user?.name || 'ICT Officer',
+          authorRole: req.user?.role || 'staff'
+        }
+      });
+      await syncArticleCollections(transaction, created.id, { tags: tags || 'uploaded-material' });
+      return transaction.knowledgeArticle.findUnique({
+        where: { id: created.id },
+        include: articleRelations
+      });
     });
+    uploadedPath = null;
 
-    res.status(201).json({ success: true, article, message: 'Material uploaded and indexed successfully.' });
+    res.status(201).json({ success: true, article: serializeArticle(article), message: 'Material uploaded and indexed successfully.' });
   } catch (error) {
+    if (uploadedPath) await removeUploadFile(uploadedPath, req.id);
     console.error('Upload material error:', error);
     res.status(500).json({ success: false, message: 'Failed to process material upload' });
+  }
+};
+
+exports.downloadArticleMaterial = async (req, res) => {
+  try {
+    const { id, storageKey } = req.params;
+    if (!/^kb-[0-9a-f-]{36}$/i.test(storageKey)) {
+      return res.status(404).json({ success: false, message: 'Material not found' });
+    }
+
+    const article = await prisma.knowledgeArticle.findUnique({
+      where: { id },
+      select: { attachments: true }
+    });
+    const attachment = Array.isArray(article?.attachments)
+      ? article.attachments.find(item => item.storageKey === storageKey)
+      : null;
+    if (!attachment) {
+      return res.status(404).json({ success: false, message: 'Material not found' });
+    }
+
+    const filePath = resolveUploadPath(path.join(uploadDir, storageKey));
+    if (!filePath) {
+      return res.status(404).json({ success: false, message: 'Material not found' });
+    }
+
+    const filename = path.basename(String(attachment.name || 'material')).replace(/[\r\n"]/g, '_');
+    return res.download(filePath, filename, error => {
+      if (!error) return;
+      console.error('Knowledge material download failed:', {
+        requestId: req.id,
+        articleId: id,
+        message: error.message
+      });
+      if (!res.headersSent) {
+        res.status(error.code === 'ENOENT' ? 404 : 500).json({
+          success: false,
+          message: error.code === 'ENOENT' ? 'Material not found' : 'Failed to download material'
+        });
+      }
+    });
+  } catch (error) {
+    console.error('Knowledge material lookup failed:', { requestId: req.id, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to download material' });
   }
 };
 
@@ -665,11 +826,12 @@ exports.getTicketSuggestions = async (req, res) => {
     if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found' });
 
     const articles = await prisma.knowledgeArticle.findMany({ 
-      where: { status: 'published', isArchived: false } 
+      where: { status: 'published', isArchived: false },
+      include: articleRelations
     });
 
     const terms = getTerms(`${ticket.subject} ${ticket.description}`);
-    const scoredArticles = articles
+    const scoredArticles = serializeArticles(articles)
       .map(article => {
         const text = `${article.title} ${article.symptoms || ''} ${article.affectedDevices || ''} ${article.tags || ''}`.toLowerCase();
         const score = terms.reduce((acc, t) => acc + (text.includes(t) ? 2 : 0), 0) + (article.category === ticket.category ? 3 : 0);

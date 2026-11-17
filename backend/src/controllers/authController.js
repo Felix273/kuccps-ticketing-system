@@ -136,11 +136,10 @@ exports.getProfile = async (req, res) => {
       user
     });
   } catch (error) {
-    console.error('Get profile error:', error);
+    console.error('Get profile error:', { requestId: req.id, message: error.message });
     res.status(500).json({ 
       success: false, 
-      message: 'Server error',
-      error: error.message 
+      message: 'Server error'
     });
   }
 };

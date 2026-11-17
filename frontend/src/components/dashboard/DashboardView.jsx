@@ -22,6 +22,7 @@ import {
   Users, 
   RefreshCw,
   Building2,
+  Smile,
   PieChart as PieIcon,
   Table as TableIcon,
   ChevronRight,
@@ -30,6 +31,7 @@ import {
 import { TicketTrendsChart } from './charts/TicketTrendsChart';
 import { TopCategoriesChart } from './TopCategoriesChart';
 import { operationsService } from '../../services/operationsService';
+import { buildTicketTrendData, countTicketsByStatus } from '../../utils/dashboardMetrics';
 
 const DONUT_COLORS = {
   Open: '#2563eb',
@@ -38,6 +40,7 @@ const DONUT_COLORS = {
   Resolved: '#059669',
   Closed: '#71717a'
 };
+const ACTIVE_TICKET_STATUSES = new Set(['Open', 'In Progress', 'On Hold']);
 
 const StatusPieTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
@@ -55,7 +58,7 @@ const StatusPieTooltip = ({ active, payload }) => {
   );
 };
 
-export const DashboardView = ({ tickets = [], isLoading = false }) => {
+export const DashboardView = ({ tickets = [], isLoading = false, onViewTickets }) => {
   const [operationsAnalytics, setOperationsAnalytics] = useState(null);
 
   useEffect(() => {
@@ -71,37 +74,11 @@ export const DashboardView = ({ tickets = [], isLoading = false }) => {
   }, [tickets.length]);
 
   const analytics = useMemo(() => {
-    // 1. 7-Day Trend Data (Used for Main Chart & Mini Sparklines)
-    const trendData = [];
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dayTickets = tickets.filter(t => {
-        const ticketDate = new Date(t.createdAt);
-        return ticketDate.toDateString() === date.toDateString();
-      });
-      trendData.push({
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        tickets: dayTickets.length,
-        active: dayTickets.filter(t => ['Open', 'In Progress', 'On Hold'].includes(t.status)).length,
-        resolved: dayTickets.filter(t => t.status === 'Resolved').length
-      });
-    }
-
-    // 2. Pie Chart Status Distribution Data
-    const openCount = tickets.filter(t => t.status === 'Open').length;
-    const inProgressCount = tickets.filter(t => t.status === 'In Progress').length;
-    const onHoldCount = tickets.filter(t => t.status === 'On Hold').length;
-    const resolvedCount = tickets.filter(t => t.status === 'Resolved').length;
-    const closedCount = tickets.filter(t => t.status === 'Closed').length;
-
-    const statusPieData = [
-      { name: 'Open', value: openCount },
-      { name: 'In Progress', value: inProgressCount },
-      { name: 'On Hold', value: onHoldCount },
-      { name: 'Resolved', value: resolvedCount },
-      { name: 'Closed', value: closedCount }
-    ].filter(item => item.value > 0);
+    const trendData = buildTicketTrendData(tickets);
+    const statusCounts = countTicketsByStatus(tickets);
+    const statusPieData = Object.entries(statusCounts)
+      .map(([name, value]) => ({ name, value }))
+      .filter(item => item.value > 0);
 
     const categoryData = operationsAnalytics?.categoryIssues || [];
 
@@ -168,15 +145,31 @@ export const DashboardView = ({ tickets = [], isLoading = false }) => {
   }, [tickets, operationsAnalytics]);
 
   const totalTickets = tickets.length;
-  const activeTickets = tickets.filter(t => ['Open', 'In Progress', 'On Hold'].includes(t.status)).length;
+  const activeTickets = tickets.filter(t => ACTIVE_TICKET_STATUSES.has(t.status)).length;
   const resolvedTickets = tickets.filter(t => t.status === 'Resolved').length;
+  const slaTickets = tickets.filter(t => t.responseDueAt || t.slaDueAt);
   const slaRate = operationsAnalytics?.slaCompliance;
+  const csatRate = operationsAnalytics?.csatSatisfactionRate;
+  const csatScore = operationsAnalytics?.csatScore;
+  const csatResponses = operationsAnalytics?.csatResponses || 0;
+  const csatTicketIds = new Set(operationsAnalytics?.csatTicketIds || []);
+  const csatTickets = tickets.filter(ticket => csatTicketIds.has(ticket.id));
   const targetAttainment = operationsAnalytics?.slaTargetAttainment;
   const targetSummaries = ['response', 'resolution'].flatMap(type =>
     (targetAttainment?.[type] || []).map(target =>
       `${type} ${target.actualPercent}% / ${target.targetPercent}% target`
     )
   );
+  const selectTickets = (label, selectedTickets) => {
+    onViewTickets?.({
+      label,
+      ticketIds: selectedTickets.map(ticket => ticket.id)
+    });
+  };
+  const selectStatus = status => {
+    if (!status) return;
+    selectTickets(`${status} tickets`, tickets.filter(ticket => ticket.status === status));
+  };
 
   if (isLoading) {
     return (
@@ -193,10 +186,15 @@ export const DashboardView = ({ tickets = [], isLoading = false }) => {
     <div className="space-y-6">
       
       {/* 1. GRAPHICAL SPARKLINE KPI CARDS */}
-      <div className="border border-zinc-200 bg-white grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-zinc-200">
+      <div className="border border-zinc-200 bg-white grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 divide-y sm:divide-y-0 sm:divide-x divide-zinc-200">
         
         {/* Card 1: Total Volume Sparkline */}
-        <div className="p-4 flex flex-col justify-between">
+        <button
+          type="button"
+          onClick={() => selectTickets('All tickets', tickets)}
+          aria-label={`View all ${totalTickets} tickets`}
+          className="group cursor-pointer p-4 flex flex-col justify-between text-left hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#990024]"
+        >
           <div className="flex items-center justify-between text-zinc-400 mb-2">
             <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-zinc-500 font-semibold">
               Total Inflow
@@ -209,25 +207,31 @@ export const DashboardView = ({ tickets = [], isLoading = false }) => {
               {totalTickets}
             </div>
             <p className="text-[11px] text-zinc-500 font-mono">
-              <span className="text-emerald-600 font-semibold">+12%</span> 7-day movement
+              Tickets across all current states
             </p>
+            <p className="mt-2 text-[10px] font-mono text-[#990024] group-hover:underline">View tickets</p>
           </div>
 
           {/* Graphical Mini Sparkline */}
           <div className="h-10 mt-3 -mx-2">
             <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 400, height: 40 }}>
               <AreaChart data={analytics.trendData}>
-                <Area type="monotone" dataKey="tickets" stroke="#990024" strokeWidth={1.5} fill="#990024" fillOpacity={0.1} />
+                <Area type="monotone" dataKey="created" stroke="#990024" strokeWidth={1.5} fill="#990024" fillOpacity={0.1} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </button>
 
         {/* Card 2: Active Queue Sparkline */}
-        <div className="p-4 flex flex-col justify-between">
+        <button
+          type="button"
+          onClick={() => selectTickets('Active tickets', tickets.filter(ticket => ACTIVE_TICKET_STATUSES.has(ticket.status)))}
+          aria-label={`View ${activeTickets} active tickets`}
+          className="group cursor-pointer p-4 flex flex-col justify-between text-left hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#990024]"
+        >
           <div className="flex items-center justify-between text-zinc-400 mb-2">
             <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-zinc-500 font-semibold">
-              Active In Progress
+              Active Queue
             </span>
             <span className="font-mono text-[10px] text-zinc-400">#02</span>
           </div>
@@ -240,22 +244,20 @@ export const DashboardView = ({ tickets = [], isLoading = false }) => {
               Requires support action
             </p>
           </div>
-
-          {/* Graphical Mini Sparkline */}
-          <div className="h-10 mt-3 -mx-2">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 400, height: 40 }}>
-              <AreaChart data={analytics.trendData}>
-                <Area type="monotone" dataKey="active" stroke="#f59e0b" strokeWidth={1.5} fill="#f59e0b" fillOpacity={0.1} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+          <p className="mt-3 font-mono text-[10px] text-zinc-400">Open · In Progress · On Hold</p>
+          <p className="mt-2 text-[10px] font-mono text-[#990024] group-hover:underline">View tickets</p>
+        </button>
 
         {/* Card 3: Resolved Telemetry Sparkline */}
-        <div className="p-4 flex flex-col justify-between">
+        <button
+          type="button"
+          onClick={() => selectStatus('Resolved')}
+          aria-label={`View ${resolvedTickets} currently resolved tickets`}
+          className="group cursor-pointer p-4 flex flex-col justify-between text-left hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#990024]"
+        >
           <div className="flex items-center justify-between text-zinc-400 mb-2">
             <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-zinc-500 font-semibold">
-              Resolved Volume
+              Currently Resolved
             </span>
             <span className="font-mono text-[10px] text-zinc-400">#03</span>
           </div>
@@ -265,22 +267,49 @@ export const DashboardView = ({ tickets = [], isLoading = false }) => {
               {resolvedTickets}
             </div>
             <p className="text-[11px] text-zinc-500 font-mono">
-              <span className="text-emerald-600 font-semibold">+8%</span> closure velocity
+              Currently in Resolved state
             </p>
           </div>
 
-          {/* Graphical Mini Sparkline */}
-          <div className="h-10 mt-3 -mx-2">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 400, height: 40 }}>
-              <AreaChart data={analytics.trendData}>
-                <Area type="monotone" dataKey="resolved" stroke="#059669" strokeWidth={1.5} fill="#059669" fillOpacity={0.1} />
-              </AreaChart>
-            </ResponsiveContainer>
+          <p className="mt-3 font-mono text-[10px] text-zinc-400">Closed tickets move to the Closed state</p>
+          <p className="mt-2 text-[10px] font-mono text-[#990024] group-hover:underline">View tickets</p>
+        </button>
+
+        {/* Customer Satisfaction */}
+        <button
+          type="button"
+          onClick={() => selectTickets('Tickets with customer feedback', csatTickets)}
+          disabled={!operationsAnalytics || csatResponses === 0}
+          aria-label={`Customer satisfaction ${csatRate == null ? 'unavailable' : `${csatRate}%`}, ${csatResponses} responses`}
+          className="group cursor-pointer p-4 flex flex-col justify-between text-left hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#990024] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <div className="flex items-center justify-between text-zinc-400 mb-2">
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-zinc-500 font-semibold">
+              Customer Satisfaction
+            </span>
+            <Smile className="h-4 w-4 text-emerald-600" aria-hidden="true" />
           </div>
-        </div>
+          <div>
+            <div className="font-mono text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
+              {csatRate == null ? '—' : `${csatRate}%`}
+            </div>
+            <p className="mt-1 text-[11px] text-zinc-500 font-mono">
+              {csatResponses
+                ? `${csatResponses} responses · average ${csatScore}/5`
+                : 'No feedback responses yet'}
+            </p>
+            <p className="mt-2 text-[10px] text-zinc-400 font-mono">Satisfied = ratings 4–5</p>
+            <p className="mt-2 text-[10px] font-mono text-[#990024] group-hover:underline">View feedback tickets</p>
+          </div>
+        </button>
 
         {/* Card 4: SLA Compliance Telemetry */}
-        <div className="p-4 flex flex-col justify-between">
+        <button
+          type="button"
+          onClick={() => selectTickets('Tickets with SLA targets', slaTickets)}
+          aria-label={`View ${slaTickets.length} tickets with SLA targets`}
+          className="group cursor-pointer p-4 flex flex-col justify-between text-left hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#990024]"
+        >
           <div className="flex items-center justify-between text-zinc-400 mb-2">
             <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-zinc-500 font-semibold">
               SLA Health Rate
@@ -304,15 +333,8 @@ export const DashboardView = ({ tickets = [], isLoading = false }) => {
             </div>
           </div>
 
-          {/* Graphical Mini Sparkline */}
-          <div className="h-10 mt-3 -mx-2">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} initialDimension={{ width: 400, height: 40 }}>
-              <AreaChart data={analytics.trendData}>
-                <Area type="monotone" dataKey="resolved" stroke="#2563eb" strokeWidth={1.5} fill="#2563eb" fillOpacity={0.1} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+          <p className="mt-2 text-[10px] font-mono text-[#990024] group-hover:underline">View tickets</p>
+        </button>
 
       </div>
 
@@ -324,16 +346,20 @@ export const DashboardView = ({ tickets = [], isLoading = false }) => {
           <div className="p-4 border-b border-zinc-200 flex items-center justify-between">
             <div>
               <span className="font-mono text-[11px] uppercase tracking-[0.1em] font-semibold text-zinc-900 block">
-                Continuous Telemetry Stream
+                Ticket Lifecycle Events
               </span>
-              <span className="text-xs text-zinc-400">7-day resolution & influx volume</span>
+              <span className="text-xs text-zinc-400">Daily ticket creation, resolution, and closure events over the last 7 days</span>
+              <span className="mt-1 block text-[10px] text-zinc-400">Closing a ticket adds a closure event; its earlier resolution event stays on its original date.</span>
             </div>
             <div className="flex items-center gap-3 font-mono text-[11px]">
               <span className="flex items-center gap-1.5 text-zinc-600">
-                <span className="w-2 h-2 bg-[#990024]"></span> New
+                <span className="w-2 h-2 bg-[#990024]"></span> Created
               </span>
               <span className="flex items-center gap-1.5 text-zinc-600">
                 <span className="w-2 h-2 bg-emerald-500"></span> Resolved
+              </span>
+              <span className="flex items-center gap-1.5 text-zinc-600">
+                <span className="w-2 h-2 bg-zinc-500"></span> Closed
               </span>
             </div>
           </div>
@@ -346,13 +372,16 @@ export const DashboardView = ({ tickets = [], isLoading = false }) => {
         {/* PIE / DONUT CHART: Ticket Lifecycle Distribution (4 cols) */}
         <div className="lg:col-span-4 border border-zinc-200 bg-white flex flex-col justify-between">
           <div className="p-4 border-b border-zinc-200 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <PieIcon className="w-4 h-4 text-zinc-500" />
-              <span className="font-mono text-[11px] uppercase tracking-[0.1em] font-semibold text-zinc-900">
-                Status Breakdown
-              </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <PieIcon className="w-4 h-4 text-zinc-500" />
+                <span className="font-mono text-[11px] uppercase tracking-[0.1em] font-semibold text-zinc-900">
+                  Status Breakdown
+                </span>
+              </div>
+              <span className="pl-6 text-[10px] text-zinc-400">Current snapshot; each ticket has one state</span>
             </div>
-            <span className="font-mono text-[10px] text-zinc-400">LIFECYCLE</span>
+            <span className="font-mono text-[10px] text-zinc-400">CURRENT_STATE</span>
           </div>
 
           {/* Donut Chart with Centered Total */}
@@ -368,6 +397,8 @@ export const DashboardView = ({ tickets = [], isLoading = false }) => {
                     outerRadius={75}
                     paddingAngle={3}
                     dataKey="value"
+                    onClick={(_, index) => selectStatus(analytics.statusPieData[index]?.name)}
+                    cursor="pointer"
                   >
                     {analytics.statusPieData.map(item => (
                       <Cell key={item.name} fill={DONUT_COLORS[item.name] || '#a1a1aa'} />
@@ -390,7 +421,13 @@ export const DashboardView = ({ tickets = [], isLoading = false }) => {
             {analytics.statusPieData.map(item => {
               const pct = totalTickets > 0 ? Math.round((item.value / totalTickets) * 100) : 0;
               return (
-                <div key={item.name} className="py-1.5 flex items-center justify-between first:pt-0 last:pb-0">
+                <button
+                  key={item.name}
+                  type="button"
+                  onClick={() => selectStatus(item.name)}
+                  aria-label={`View ${item.value} ${item.name} tickets`}
+                  className="w-full py-1.5 flex items-center justify-between text-left hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#990024]"
+                >
                   <div className="flex items-center gap-2">
                     <span 
                       className="w-2 h-2 rounded-xs" 
@@ -401,7 +438,7 @@ export const DashboardView = ({ tickets = [], isLoading = false }) => {
                   <span className="font-semibold text-zinc-900 tabular-nums">
                     {item.value} <span className="text-zinc-400 font-normal">({pct}%)</span>
                   </span>
-                </div>
+                </button>
               );
             })}
           </div>

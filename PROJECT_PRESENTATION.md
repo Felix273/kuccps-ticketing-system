@@ -385,7 +385,7 @@ Most specific match wins.
 - Username + password form
 - Show/hide password toggle
 - Remember me checkbox
-- Demo credentials: `admin / admin123`, `itstaff / staff123`
+- Local demo-account shortcuts are available only in the Vite development build.
 - LDAP/AD notice
 - Animated blob background
 
@@ -602,7 +602,7 @@ Startup: load env → create app → request ID → security headers → CORS �
 ### 7.3 Seed Data
 
 - Department: `ICT`
-- Users: `admin / admin123` (admin), `itstaff / staff123` (staff)
+- Initial admin: supplied through the protected `BOOTSTRAP_ADMIN_*` environment variables
 - Default system settings
 - Default email templates: `ticketCreated`, `ticketUpdated`, `ticketResolved`
 

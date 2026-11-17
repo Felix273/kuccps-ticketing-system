@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, LoaderCircle, Star } from 'lucide-react';
+import { CheckCircle2, AlertCircle, RefreshCw, Star } from 'lucide-react';
 import { operationsService } from '../../services/operationsService';
 
 const RATING_LABELS = {
-  1: 'Very dissatisfied',
-  2: 'Dissatisfied',
-  3: 'Satisfied',
+  5: 'Extremely Contented',
   4: 'Contented',
-  5: 'Extremely contented'
+  3: 'Satisfied (Good)',
+  2: 'Discontented',
+  1: 'Very Discontented'
 };
 
 export const CsatFeedbackPage = ({ token }) => {
@@ -16,17 +16,32 @@ export const CsatFeedbackPage = ({ token }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [submitted, setSubmitted] = useState(false);
+  const [ticketClosed, setTicketClosed] = useState(false);
+  const [commentSaved, setCommentSaved] = useState(false);
 
   useEffect(() => {
     let active = true;
+
+    // 1. Validate token & Immediately auto-submit rating to CLOSE the ticket
     operationsService.getPublicCsat(token)
-      .then(result => {
-        if (active && result.success) setFeedback(result);
-        else if (active) setError(result.message || 'This feedback link is unavailable.');
+      .then(async (result) => {
+        if (!active) return;
+        if (result.success) {
+          setFeedback(result);
+          // Auto-submit the rating immediately to set status to 'Closed'
+          try {
+            await operationsService.submitPublicCsat(token, '');
+            setTicketClosed(true);
+          } catch {
+            // Already rated or closed
+            setTicketClosed(true);
+          }
+        } else {
+          setError(result.message || 'This feedback link is unavailable.');
+        }
       })
-      .catch(requestError => {
-        if (active) setError(requestError.message || 'This feedback link is invalid or has expired.');
+      .catch((err) => {
+        if (active) setError(err.message || 'This feedback link has expired or was already submitted.');
       })
       .finally(() => {
         if (active) setIsLoading(false);
@@ -37,108 +52,106 @@ export const CsatFeedbackPage = ({ token }) => {
     };
   }, [token]);
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    if (!feedback || isSubmitting || submitted) return;
+  const handleSaveComment = async (e) => {
+    e.preventDefault();
+    if (!comment.trim() || isSubmitting) return;
 
     setIsSubmitting(true);
-    setError('');
     try {
-      const result = await operationsService.submitPublicCsat(token, comment);
-      if (result.success) {
-        setSubmitted(true);
-      } else {
-        setError(result.message || 'We could not save your feedback. Please try again.');
-      }
-    } catch (requestError) {
-      setError(requestError.message || 'We could not save your feedback. Please try again.');
+      await operationsService.submitPublicCsat(token, comment);
+      setCommentSaved(true);
+    } catch (err) {
+      setError(err.message || 'Failed to save comment');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4 font-sans">
+        <div className="flex items-center gap-3 font-mono text-xs text-zinc-500">
+          <RefreshCw className="w-5 h-5 animate-spin text-[#990024]" />
+          <span>RECORDING_RATING_AND_CLOSING_TICKET...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-10 sm:py-16 flex items-center justify-center font-sans text-slate-800">
-      <section className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl sm:p-8">
-        <div className="mb-6 text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 text-[#990024]">
-            {submitted ? <CheckCircle2 className="h-6 w-6" /> : <Star className="h-6 w-6" />}
+    <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4 font-sans text-zinc-800">
+      <div className="max-w-md w-full bg-white border border-zinc-200 shadow-xl rounded-2xl p-6 sm:p-8 space-y-6">
+        
+        {/* Header */}
+        <div className="text-center space-y-2">
+          <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-100">
+            <CheckCircle2 className="w-7 h-7" />
           </div>
-          <h1 className="text-xl font-bold tracking-tight text-slate-900">
-            {submitted ? 'Thank you for your feedback' : 'Rate your support experience'}
-          </h1>
+
+          <h2 className="text-xl font-bold text-zinc-900 tracking-tight">
+            Thank you for your feedback!
+          </h2>
+
           {feedback && (
-            <p className="mt-2 text-sm text-slate-500">
-              Ticket <span className="font-semibold text-slate-700">{feedback.ticketNumber}</span>
+            <p className="font-mono text-xs text-zinc-500">
+              Ticket <strong className="text-zinc-900">#{feedback.ticketNumber}</strong> is now officially <span className="text-emerald-700 font-bold uppercase">Closed</span>.
             </p>
           )}
         </div>
 
-        {isLoading ? (
-          <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-500">
-            <LoaderCircle className="h-4 w-4 animate-spin" />
-            Validating your feedback link...
+        {error ? (
+          <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-lg text-xs font-mono text-rose-800 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{error}</span>
           </div>
-        ) : submitted ? (
-          <p className="rounded-xl bg-emerald-50 p-4 text-center text-sm text-emerald-800">
-            Your rating has been recorded. Thank you for helping us improve our ICT support.
-          </p>
-        ) : feedback ? (
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center">
-              <div className="flex justify-center gap-1 text-amber-400" aria-label={`${feedback.rating} out of 5 stars`}>
-                {Array.from({ length: 5 }, (_, index) => (
-                  <Star
-                    key={index}
-                    className={`h-7 w-7 ${index < feedback.rating ? 'fill-current' : 'text-slate-300'}`}
-                  />
-                ))}
-              </div>
-              <p className="mt-2 text-sm font-semibold text-slate-800">
-                {feedback.rating} out of 5 — {RATING_LABELS[feedback.rating]}
-              </p>
-            </div>
-
-            <div>
-              <label htmlFor="csat-comment" className="mb-1.5 block text-sm font-semibold text-slate-700">
-                Additional comments <span className="font-normal text-slate-400">(optional)</span>
-              </label>
-              <textarea
-                id="csat-comment"
-                value={comment}
-                onChange={event => setComment(event.target.value)}
-                maxLength={2000}
-                rows={4}
-                placeholder="Tell us what went well or how we can improve."
-                className="w-full resize-y rounded-xl border border-slate-300 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-[#990024] focus:ring-2 focus:ring-[#990024]/15"
-              />
-              <p className="mt-1 text-right text-xs text-slate-400">{comment.length}/2000</p>
-            </div>
-
-            {error && (
-              <p role="alert" className="flex items-start gap-2 rounded-lg bg-rose-50 p-3 text-sm text-rose-800">
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                {error}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#990024] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#80001e] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSubmitting && <LoaderCircle className="h-4 w-4 animate-spin" />}
-              {isSubmitting ? 'Submitting feedback...' : 'Submit feedback'}
-            </button>
-            <p className="text-center text-xs text-slate-400">No login required. Your feedback is linked to this ticket.</p>
-          </form>
         ) : (
-          <p role="alert" className="flex items-start gap-2 rounded-lg bg-rose-50 p-4 text-sm text-rose-800">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            {error || 'This feedback link is invalid or has expired. Please contact ICT support if you still need help.'}
-          </p>
+          feedback && (
+            <div className="space-y-4">
+              {/* Recorded Star Card */}
+              <div className="p-4 rounded-xl border border-zinc-200 bg-zinc-50 text-center space-y-1">
+                <div className="flex items-center justify-center gap-1 text-amber-400 text-lg">
+                  {Array.from({ length: feedback.rating || 5 }).map((_, i) => (
+                    <Star key={i} className="w-5 h-5 fill-current" />
+                  ))}
+                </div>
+                <p className="font-mono text-xs font-bold text-zinc-800">
+                  {feedback.rating} Stars — {RATING_LABELS[feedback.rating] || 'Satisfied'}
+                </p>
+                <p className="text-[11px] text-zinc-400 font-mono">
+                  Feedback registered in ICT Directorate analytics.
+                </p>
+              </div>
+
+              {/* Optional Comment Section */}
+              {!commentSaved ? (
+                <form onSubmit={handleSaveComment} className="space-y-3 pt-2 border-t border-zinc-100">
+                  <label className="block text-xs font-mono font-semibold text-zinc-600">
+                    Would you like to leave any additional comments? (Optional)
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    placeholder="Tell us what went well or how we can improve..."
+                    className="w-full p-2.5 text-xs bg-zinc-50 border border-zinc-200 rounded-lg focus:outline-none focus:border-[#990024] focus:bg-white font-sans"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!comment.trim() || isSubmitting}
+                    className="w-full py-2 bg-[#990024] hover:bg-[#80001e] text-white text-xs font-mono font-bold rounded-lg shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSubmitting ? 'Saving Note...' : 'Submit Additional Note'}
+                  </button>
+                </form>
+              ) : (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-mono text-emerald-800 text-center">
+                  Your comment has been attached to the closed ticket record.
+                </div>
+              )}
+            </div>
+          )
         )}
-      </section>
-    </main>
+      </div>
+    </div>
   );
 };

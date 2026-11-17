@@ -1,4 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
+const { parseDelimitedValues } = require('../src/services/normalizedValues');
 const prisma = new PrismaClient();
 
 function slugify(text) {
@@ -464,53 +465,66 @@ ${article.resolution}
 ${article.escalation}
 `.trim();
 
-    await prisma.knowledgeArticle.upsert({
-      where: { slug },
-      update: {
-        title: article.title,
-        category: article.category,
-        affectedDevices: article.affectedDevices,
-        symptoms: article.symptoms,
-        cause: article.cause,
-        resolution: article.resolution,
-        escalation: article.escalation,
-        tags: article.tags,
-        excerpt: article.excerpt,
-        content: synthesizedContent,
-        status: 'published',
-        isArchived: false,
-        version: 1,
-        authorName: 'ICT Directorate',
-        authorRole: 'admin'
-      },
-      create: {
-        title: article.title,
-        slug,
-        category: article.category,
-        affectedDevices: article.affectedDevices,
-        symptoms: article.symptoms,
-        cause: article.cause,
-        resolution: article.resolution,
-        escalation: article.escalation,
-        tags: article.tags,
-        excerpt: article.excerpt,
-        content: synthesizedContent,
-        status: 'published',
-        isArchived: false,
-        version: 1,
-        authorName: 'ICT Directorate',
-        authorRole: 'admin',
-        revisions: {
-          create: {
-            version: 1,
-            title: article.title,
-            content: synthesizedContent,
-            symptoms: article.symptoms,
-            resolution: article.resolution,
-            changedBy: 'ICT Directorate Seed',
-            reason: 'Initial institutional enterprise baseline'
+    await prisma.$transaction(async transaction => {
+      const saved = await transaction.knowledgeArticle.upsert({
+        where: { slug },
+        update: {
+          title: article.title,
+          category: article.category,
+          affectedDevices: article.affectedDevices,
+          symptoms: article.symptoms,
+          cause: article.cause,
+          resolution: article.resolution,
+          escalation: article.escalation,
+          excerpt: article.excerpt,
+          content: synthesizedContent,
+          status: 'published',
+          isArchived: false,
+          version: 1,
+          authorName: 'ICT Directorate',
+          authorRole: 'admin'
+        },
+        create: {
+          title: article.title,
+          slug,
+          category: article.category,
+          affectedDevices: article.affectedDevices,
+          symptoms: article.symptoms,
+          cause: article.cause,
+          resolution: article.resolution,
+          escalation: article.escalation,
+          excerpt: article.excerpt,
+          content: synthesizedContent,
+          status: 'published',
+          isArchived: false,
+          version: 1,
+          authorName: 'ICT Directorate',
+          authorRole: 'admin',
+          revisions: {
+            create: {
+              version: 1,
+              title: article.title,
+              content: synthesizedContent,
+              symptoms: article.symptoms,
+              resolution: article.resolution,
+              changedBy: 'ICT Directorate Seed',
+              reason: 'Initial institutional enterprise baseline'
+            }
           }
         }
+      });
+
+      await transaction.knowledgeArticleTag.deleteMany({ where: { articleId: saved.id } });
+      for (const tagName of parseDelimitedValues(article.tags)) {
+        const normalizedName = tagName.toLowerCase();
+        const tag = await transaction.knowledgeTag.upsert({
+          where: { normalizedName },
+          create: { name: tagName, normalizedName },
+          update: {}
+        });
+        await transaction.knowledgeArticleTag.create({
+          data: { articleId: saved.id, tagId: tag.id }
+        });
       }
     });
 

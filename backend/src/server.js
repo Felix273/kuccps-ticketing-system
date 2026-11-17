@@ -13,6 +13,7 @@ const { requestId, securityHeaders, rateLimit, validateProductionConfig } = requ
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const HOST = process.env.HOST || (process.env.NODE_ENV === 'production' ? '127.0.0.1' : '0.0.0.0');
 const prisma = new PrismaClient();
 
 validateProductionConfig();
@@ -60,17 +61,19 @@ app.use('/api/tickets', ticketRoutes); // Must come AFTER public routes
 // Health check with dynamic organization name
 app.get('/health', async (req, res) => {
   try {
-    // Get organization name from system settings
     const settings = await prisma.systemSettings.findFirst();
     const orgName = settings ? settings.organizationName : 'KUCCPS';
 
-    res.json({
+    return res.json({
       status: 'OK',
       message: `${orgName} Ticketing System API is running`
     });
   } catch (error) {
-    // Fallback to default if database error
-    res.json({ status: 'OK', message: 'KUCCPS Ticketing System API is running' });
+    console.error('Health check failed:', { requestId: req.id, message: error.message });
+    return res.status(503).json({
+      status: 'ERROR',
+      message: 'Database is unavailable'
+    });
   }
 });
 
@@ -83,8 +86,8 @@ app.use((err, req, res, next) => {
     return res.status(413).json({ success: false, message: 'Uploaded file is too large' });
   }
 
-  if (err?.message === 'File type is not allowed') {
-    return res.status(415).json({ success: false, message: err.message });
+  if (err?.message === 'File type is not allowed' || err?.message?.startsWith('Invalid file type.')) {
+    return res.status(415).json({ success: false, message: 'File type is not allowed' });
   }
 
   console.error('Unhandled request error:', { requestId: req.id, message: err.message });
@@ -92,9 +95,9 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`✓ Server running on port ${PORT}`);
-  console.log(`✓ API available at http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`✓ Server running at http://${HOST}:${PORT}`);
+  console.log(`✓ API available at http://${HOST}:${PORT}`);
   startNotificationJobs();
 
   // Start email monitoring if credentials are configured

@@ -24,8 +24,7 @@ exports.getAllDepartments = async (req, res) => {
     console.error('Get departments error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch departments',
-      error: error.message
+      message: 'Failed to fetch departments'
     });
   }
 };
@@ -59,8 +58,7 @@ exports.getDepartmentById = async (req, res) => {
     console.error('Get department error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch department',
-      error: error.message
+      message: 'Failed to fetch department'
     });
   }
 };
@@ -110,8 +108,7 @@ exports.createDepartment = async (req, res) => {
     console.error('Create department error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to create department',
-      error: error.message
+      message: 'Failed to create department'
     });
   }
 };
@@ -178,8 +175,7 @@ exports.updateDepartment = async (req, res) => {
     console.error('Update department error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to update department',
-      error: error.message
+      message: 'Failed to update department'
     });
   }
 };
@@ -226,8 +222,7 @@ exports.deleteDepartment = async (req, res) => {
     console.error('Delete department error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to delete department',
-      error: error.message
+      message: 'Failed to delete department'
     });
   }
 };
@@ -245,7 +240,7 @@ exports.syncDirectoratesFromAd = async (req, res) => {
     console.error('AD directorate sync error:', error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to sync directorates from Active Directory'
+      message: 'Failed to sync directorates from Active Directory'
     });
   }
 };

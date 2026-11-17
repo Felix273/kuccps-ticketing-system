@@ -407,16 +407,22 @@ Main models:
 | `TicketHistory` | Audit trail of ticket field changes |
 | `EmailConfig` | Email configuration records |
 | `SystemSettings` | Branding, SMTP/IMAP, LDAP, ticket defaults, UI settings |
+| `SystemSettingsAllowedFileType` | Allowed upload extensions for system settings |
 | `EmailTemplate` | Email templates for ticket lifecycle events |
 | `SavedView` | Saved ticket views and filters |
 | `KnowledgeArticle` | Knowledge base articles |
+| `KnowledgeTag` / `KnowledgeArticleTag` | Reusable article tags and their many-to-many links |
+| `KnowledgeArticleRelation` | Links between related knowledge articles |
 | `StatusIssue` | Public/internal status incidents |
+| `StatusSystem` / `StatusIssueSystem` | Reusable affected systems and their incident links |
 | `StatusIssueUpdate` | Updates for status incidents |
 | `CustomForm` | Custom intake forms |
 | `CustomFormField` | Fields belonging to custom forms |
 | `SlaPolicy` | SLA response/resolution policies |
 | `CsatResponse` | Customer satisfaction responses |
 | `NotificationPreference` | Per-user notification preferences |
+
+Affected systems, article tags, related-article links, and allowed upload extensions are stored as relational rows rather than comma-separated database fields. The migration splits existing values, links related articles when their IDs or slugs match, and preserves unmatched references. Existing API fields remain comma-separated strings for compatibility.
 
 ## Frontend structure
 
@@ -534,6 +540,7 @@ Production notes:
 - `PUBLIC_TICKET_API_KEY` should be at least 32 characters.
 - Set backend `PUBLIC_APP_URL` to the public frontend URL so CSAT email links open the deployed app, not localhost.
 - For local testing only, set `PUBLIC_APP_URL=http://localhost:5173` explicitly.
+- The dashboard CSAT rate is the percentage of submitted ratings that are 4 or 5 stars; no responses is shown as unavailable.
 - `NODE_ENV=production` enables stricter validation in `backend/src/middleware/security.js`.
 - Production frontend URLs should use HTTPS.
 - Do not use wildcard CORS origins in production.

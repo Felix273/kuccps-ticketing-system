@@ -28,22 +28,19 @@ This guide covers setting up the Google Workspace Add-on for development and tes
 
 | Property | Value | Description |
 |----------|-------|-------------|
-| `API_URL` | `http://localhost:5000/api` | Backend API URL (use ngrok/tunnel for local testing) |
-| `BACKEND_API_KEY` | Your public API key | Authentication key |
+| `API_URL` | `https://api.example.ac.ke/api` | HTTPS backend API base URL |
+| `BACKEND_API_KEY` | Same value as backend `PUBLIC_TICKET_API_KEY` | Authentication key; store only in Script Properties |
 | `SUPPORT_EMAIL` | `itsupport@kuccps.ac.ke` | Support email address |
 
-## Step 4: Run Setup Function
+The add-on appends `/public/tickets` to `API_URL`. For production, use the public HTTPS
+API base ending in `/api`. Never put the API key in `Code.gs` or a frontend `VITE_*`
+variable.
 
-Run `setupProductionProperties` from the Apps Script editor to populate properties if they are empty:
+## Step 4: Confirm Script Properties
 
-```javascript
-function setupProductionProperties() {
-  const properties = PropertiesService.getScriptProperties();
-  properties.setProperty('API_URL', 'https://api.example.ac.ke/api');
-  properties.setProperty('BACKEND_API_KEY', 'your-api-key-here');
-  properties.setProperty('SUPPORT_EMAIL', 'itsupport@kuccps.ac.ke');
-}
-```
+Set `API_URL`, `BACKEND_API_KEY`, and `SUPPORT_EMAIL` under **Project Settings → Script
+Properties**. The optional `setupProductionProperties` helper only fills a missing support
+email; it does not set the endpoint or key.
 
 ## Step 5: Test Deployment
 
@@ -58,9 +55,10 @@ function setupProductionProperties() {
 3. Configure deployment settings
 4. Click **Install** to install for your domain
 
-## Local Testing with Tunnels
+## Local Testing with an HTTPS Tunnel
 
-For local development, use a tunnel service like `ngrok` or `cloudflared` to expose your local backend:
+The add-on rejects non-HTTPS API URLs. For local testing, use an approved HTTPS tunnel to
+expose the local backend:
 
 ```bash
 # Using ngrok
@@ -70,7 +68,8 @@ ngrok http 5000
 cloudflared tunnel --url http://localhost:5000
 ```
 
-Update `API_URL` in Apps Script properties to the tunnel URL.
+Set `API_URL` to the tunnel's backend API base plus `/api`, for example
+`https://<tunnel-host>/api`. Use a short-lived development API key, never the production key.
 
 > **Warning:** Do not use temporary tunnel URLs for production. Use a named Cloudflare Tunnel or official HTTPS domain.
 

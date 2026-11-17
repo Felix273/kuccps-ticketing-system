@@ -1,4 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
+const { resolveUploadPath, removeUploadFile } = require('../services/uploadStorage');
 const { sendEmail, sendTicketReply } = require('../services/emailService');
 const { createTicketNotification } = require('../services/notificationService');
 const { auditLog } = require('../middleware/security');
@@ -198,7 +199,19 @@ exports.getTicketById = async (req, res) => {
     const { id } = req.params;
     const ticket = await prisma.ticket.findUnique({
       where: { id },
-      include: { department: true, assignedTo: { select: { id: true, name: true, email: true } }, createdBy: { select: { id: true, name: true, email: true } }, comments: { include: { user: { select: { id: true, name: true, email: true, role: true } } }, orderBy: { createdAt: 'asc' } }, attachments: true, history: { orderBy: { createdAt: 'desc' } } }
+      include: {
+        department: true,
+        assignedTo: { select: { id: true, name: true, email: true } },
+        createdBy: { select: { id: true, name: true, email: true } },
+        comments: {
+          include: { user: { select: { id: true, name: true, email: true, role: true } } },
+          orderBy: { createdAt: 'asc' }
+        },
+        attachments: {
+          select: { id: true, filename: true, mimetype: true, size: true, createdAt: true }
+        },
+        history: { orderBy: { createdAt: 'desc' } }
+      }
     });
     if (!ticket) {
       return res.status(404).json({ success: false, message: 'Ticket not found' });
@@ -357,8 +370,7 @@ exports.updateTicket = async (req, res) => {
           ticket,
           type: 'status_change',
           title: 'Ticket status updated',
-          message: `${ticket.ticketNumber}: status changed from ${existing.status} to ${ticket.status}`,
-          emailPreference: 'emailOnStatusChange'
+          message: `${ticket.ticketNumber}: status changed from ${existing.status} to ${ticket.status}`
         })));
     }
 
@@ -368,8 +380,7 @@ exports.updateTicket = async (req, res) => {
         ticket,
         type: 'assignment',
         title: 'Ticket assigned to you',
-        message: `${ticket.ticketNumber}: ${ticket.subject}`,
-        emailPreference: 'emailOnAssignment'
+        message: `${ticket.ticketNumber}: ${ticket.subject}`
       });
     }
     return res.json({ success: true, ticket: decorateTicket(ticket) });
@@ -441,8 +452,7 @@ exports.escalateTicket = async (req, res) => {
         ticket: updated,
         type: 'escalation',
         title: 'Ticket escalated to you',
-        message: `${updated.ticketNumber}: ${updated.subject}${safeReason ? ` - ${safeReason}` : ''}`,
-        emailPreference: 'escalationAlerts'
+        message: `${updated.ticketNumber}: ${updated.subject}${safeReason ? ` - ${safeReason}` : ''}`
       });
     }
 
@@ -525,8 +535,7 @@ exports.addComment = async (req, res) => {
         ticket: existingTicket,
         type: 'comment',
         title: 'New ticket comment',
-        message: `${commentAuthorName} commented on ${existingTicket.ticketNumber}: ${safeContent.slice(0, 180)}`,
-        emailPreference: 'emailOnNewComment'
+        message: `${commentAuthorName} commented on ${existingTicket.ticketNumber}: ${safeContent.slice(0, 180)}`
       })));
 
     return res.status(201).json({ success: true, comment });
@@ -537,39 +546,97 @@ exports.addComment = async (req, res) => {
 };
 
 exports.addAttachment = async (req, res) => {
+  let uploadedPath;
   try {
     const { id } = req.params;
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'Attachment file is required' });
     }
+    uploadedPath = req.file.path;
     const ticket = await prisma.ticket.findUnique({ where: { id } });
-    if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found' });
+    if (!ticket) {
+      await removeUploadFile(uploadedPath, req.id);
+      return res.status(404).json({ success: false, message: 'Ticket not found' });
+    }
 
     const originalName = cleanFilename(req.file.originalname);
-    const attachment = await prisma.attachment.create({
-      data: {
-        ticketId: id,
-        filename: originalName,
-        filepath: req.file.path,
-        mimetype: req.file.mimetype,
-        size: req.file.size
+    const attachment = await prisma.$transaction(async tx => {
+      const savedAttachment = await tx.attachment.create({
+        data: {
+          ticketId: id,
+          filename: originalName,
+          filepath: req.file.filename,
+          mimetype: req.file.mimetype,
+          size: req.file.size
+        }
+      });
+
+      await tx.ticketHistory.create({
+        data: {
+          ticketId: id,
+          field: 'attachment',
+          oldValue: '',
+          newValue: originalName,
+          changedBy: req.user?.id || ''
+        }
+      });
+
+      return savedAttachment;
+    });
+    uploadedPath = null;
+
+    res.status(201).json({
+      success: true,
+      attachment: {
+        id: attachment.id,
+        filename: attachment.filename,
+        mimetype: attachment.mimetype,
+        size: attachment.size,
+        createdAt: attachment.createdAt
       }
     });
-
-    await prisma.ticketHistory.create({
-      data: {
-        ticketId: id,
-        field: 'attachment',
-        oldValue: '',
-        newValue: originalName,
-        changedBy: req.user?.id || ''
-      }
-    });
-
-    res.status(201).json({ success: true, attachment });
   } catch (error) {
+    if (uploadedPath) await removeUploadFile(uploadedPath, req.id);
     console.error('Error adding attachment:', error);
     res.status(500).json({ success: false, message: 'Failed to add attachment' });
+  }
+};
+
+exports.downloadAttachment = async (req, res) => {
+  try {
+    const attachment = await prisma.attachment.findFirst({
+      where: { id: req.params.attachmentId, ticketId: req.params.id }
+    });
+    if (!attachment) {
+      return res.status(404).json({ success: false, message: 'Attachment not found' });
+    }
+
+    const filePath = resolveUploadPath(attachment.filepath);
+    if (!filePath) {
+      console.error('Attachment path is outside the configured upload directory:', {
+        requestId: req.id,
+        attachmentId: attachment.id
+      });
+      return res.status(404).json({ success: false, message: 'Attachment not found' });
+    }
+
+    return res.download(filePath, cleanFilename(attachment.filename), error => {
+      if (!error) return;
+      console.error('Attachment download failed:', {
+        requestId: req.id,
+        attachmentId: attachment.id,
+        message: error.message
+      });
+      if (!res.headersSent) {
+        res.status(error.code === 'ENOENT' ? 404 : 500).json({
+          success: false,
+          message: error.code === 'ENOENT' ? 'Attachment not found' : 'Failed to download attachment'
+        });
+      }
+    });
+  } catch (error) {
+    console.error('Attachment lookup failed:', { requestId: req.id, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to download attachment' });
   }
 };
 

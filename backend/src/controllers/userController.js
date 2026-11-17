@@ -56,8 +56,7 @@ exports.getAllUsers = async (req, res) => {
     console.error('Get users error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch users',
-      error: error.message
+      message: 'Failed to fetch users'
     });
   }
 };
@@ -145,8 +144,7 @@ exports.createUser = async (req, res) => {
     console.error('Create user error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to create user',
-      error: error.message
+      message: 'Failed to create user'
     });
   }
 };
@@ -250,8 +248,7 @@ exports.updateUser = async (req, res) => {
     console.error('Update user error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to update user',
-      error: error.message
+      message: 'Failed to update user'
     });
   }
 };
@@ -286,8 +283,7 @@ exports.deleteUser = async (req, res) => {
     console.error('Delete user error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to delete user',
-      error: error.message
+      message: 'Failed to delete user'
     });
   }
 };
@@ -305,7 +301,7 @@ exports.syncUsersFromAd = async (req, res) => {
     console.error('AD user sync error:', error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Failed to sync users from Active Directory'
+      message: 'Failed to sync users from Active Directory'
     });
   }
 };

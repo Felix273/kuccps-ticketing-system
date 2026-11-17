@@ -56,5 +56,31 @@ export const ticketService = {
       body: formData
     });
     return response.json();
+  },
+
+  async downloadAttachment(ticketId, attachmentId, filename) {
+    const response = await fetch(`${api.baseURL}/tickets/${ticketId}/attachments/${attachmentId}`, {
+      headers: api.getAuthHeader()
+    });
+
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      if (window.location.pathname !== '/') window.location.href = '/';
+      throw new Error('Authentication failed. Please login again.');
+    }
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.message || `Download failed with status ${response.status}`);
+    }
+
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 };

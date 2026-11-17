@@ -20,12 +20,13 @@ The seed script creates the following data:
 | `name` | ICT |
 | `code` | ICT |
 
-### Users
+### Administrator account
 
-| Username | Password | Name | Role | Department |
-|----------|----------|------|------|-----------|
-| `admin` | `admin123` | System Administrator | `admin` | ICT |
-| `itstaff` | `staff123` | IT Staff | `staff` | ICT |
+The seed creates an administrator only when the database has no administrator. Configure
+`BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_NAME`, and
+`BOOTSTRAP_ADMIN_PASSWORD` in the environment before seeding a new production database.
+The password must be at least 16 characters and include uppercase, lowercase, and numeric
+characters. The seed does not create a default staff account.
 
 ### System Settings
 
@@ -78,6 +79,7 @@ To customize seed data, edit `backend/prisma/seed.js`. You can add additional us
 
 ## Production Considerations
 
-- **Never run `db seed` in production** — it will create duplicate records or overwrite existing data.
-- **Change default passwords immediately** after seeding.
-- **Use environment-specific seed scripts** for staging and production if needed.
+- Review and back up the production database before seeding.
+- Seed a fresh database once, with bootstrap credentials provided through a protected environment.
+- Remove the bootstrap password from the deployment environment after the initial administrator exists.
+- The seed uses upserts for default data and does not replace existing administrator accounts.

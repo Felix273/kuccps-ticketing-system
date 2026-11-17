@@ -216,8 +216,8 @@ model SystemSettings {
   googleAddonApiUrl  String?
   googleAddonEnabled Boolean @default(false)
 
-  maxFileSize      Int    @default(10485760)
-  allowedFileTypes String @default("jpg,jpeg,png,gif,pdf,doc,docx,xls,xlsx,zip")
+  maxFileSize      Int                             @default(10485760)
+  allowedFileTypes SystemSettingsAllowedFileType[]
 
   maintenanceMode    Boolean @default(false)
   maintenanceMessage String?
@@ -226,6 +226,15 @@ model SystemSettings {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model SystemSettingsAllowedFileType {
+  systemSettingsId String
+  extension        String
+  systemSettings   SystemSettings @relation(fields: [systemSettingsId], references: [id], onDelete: Cascade)
+
+  @@id([systemSettingsId, extension])
+  @@index([extension])
 }
 
 model EmailTemplate {
@@ -263,17 +272,34 @@ model StatusIssue {
   description String              @db.Text
   status      String              @default("Investigating")
   severity    String              @default("Informational")
-  systems     String              @default("")
   isPublic    Boolean             @default(true)
   startedAt   DateTime            @default(now())
   resolvedAt  DateTime?
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
   updates     StatusIssueUpdate[]
+  systems     StatusIssueSystem[]
 
   @@index([status])
   @@index([severity])
   @@index([isPublic])
+}
+
+model StatusSystem {
+  id             String              @id @default(uuid())
+  name           String
+  normalizedName String              @unique
+  issues         StatusIssueSystem[]
+}
+
+model StatusIssueSystem {
+  issueId  String
+  systemId String
+  issue    StatusIssue  @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  system   StatusSystem @relation(fields: [systemId], references: [id], onDelete: Cascade)
+
+  @@id([issueId, systemId])
+  @@index([systemId])
 }
 
 model StatusIssueUpdate {
@@ -487,7 +513,6 @@ model KnowledgeArticle {
   excerpt  String?
   content  String  @db.Text
   category String
-  tags     String  @default("")
   status   String  @default("published") // draft, pending_review, published, archived
 
   // Structured ICT Troubleshooting Fields
@@ -496,7 +521,6 @@ model KnowledgeArticle {
   cause           String? @db.Text
   resolution      String? @db.Text
   escalation      String? @db.Text
-  relatedArticles String? @db.Text // Comma-separated slugs or IDs
   attachments     Json? // Array of { name, url, size, mimeType }
 
   // Author & Review Metadata
@@ -516,8 +540,12 @@ model KnowledgeArticle {
   helpful    Int @default(0)
   notHelpful Int @default(0)
 
-  revisions KnowledgeRevision[]
-  feedbacks KnowledgeFeedback[]
+  revisions         KnowledgeRevision[]
+  feedbacks         KnowledgeFeedback[]
+  tags              KnowledgeArticleTag[]
+  relatedFrom       KnowledgeArticleRelation[]         @relation("ArticleRelationsFrom")
+  relatedTo         KnowledgeArticleRelation[]         @relation("ArticleRelationsTo")
+  relatedReferences KnowledgeArticleRelatedReference[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -525,6 +553,42 @@ model KnowledgeArticle {
   @@index([category])
   @@index([status])
   @@index([isArchived])
+}
+
+model KnowledgeTag {
+  id             String                @id @default(uuid())
+  name           String
+  normalizedName String                @unique
+  articles       KnowledgeArticleTag[]
+}
+
+model KnowledgeArticleTag {
+  articleId String
+  tagId     String
+  article   KnowledgeArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  tag       KnowledgeTag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, tagId])
+  @@index([tagId])
+}
+
+model KnowledgeArticleRelation {
+  articleId        String
+  relatedArticleId String
+  article          KnowledgeArticle @relation("ArticleRelationsFrom", fields: [articleId], references: [id], onDelete: Cascade)
+  relatedArticle   KnowledgeArticle @relation("ArticleRelationsTo", fields: [relatedArticleId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, relatedArticleId])
+  @@index([relatedArticleId])
+}
+
+model KnowledgeArticleRelatedReference {
+  id        String           @id @default(uuid())
+  articleId String
+  reference String
+  article   KnowledgeArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, reference])
 }
 
 model KnowledgeRevision {

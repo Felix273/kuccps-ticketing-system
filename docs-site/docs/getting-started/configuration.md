@@ -16,17 +16,19 @@ DATABASE_URL="postgresql://user:password@localhost:5432/database_name?schema=pub
 
 ```env
 PORT=5000
+HOST=127.0.0.1
 NODE_ENV=development
 ```
 
 ### JWT Authentication
 
 ```env
-JWT_SECRET=change-this-to-a-long-random-secret
-JWT_EXPIRES_IN=7d
+JWT_SECRET=<unique-random-value>
+JWT_EXPIRES_IN=8h
 ```
 
-- `JWT_SECRET` must be at least 32 characters in production.
+- Generate a unique random `JWT_SECRET` with at least 32 characters for production; for
+  example, `openssl rand -hex 32`. Do not use the example placeholder as a value.
 
 ### CORS
 
@@ -39,12 +41,12 @@ For local development, both Vite ports are allowed. In production, use HTTPS URL
 ### Public Ticket API Key
 
 ```env
-PUBLIC_TICKET_API_KEY=change-this-to-a-long-random-secret
+PUBLIC_TICKET_API_KEY=<different-unique-random-value>
 REQUIRE_PUBLIC_TICKET_API_KEY=true
 ```
 
 - Used by the Google Workspace Add-on to create tickets.
-- Must be at least 32 characters in production.
+- Generate a different, unique random value of at least 32 characters in production.
 
 ### SMTP / Outbound Email
 
@@ -55,6 +57,11 @@ EMAIL_PASSWORD=
 EMAIL_FROM="KUCCPS IT Support <itsupport@example.ac.ke>"
 SUPPORT_EMAIL=itsupport@example.ac.ke
 ```
+
+For resolved-ticket satisfaction links, set `PUBLIC_APP_URL` to the public frontend
+origin (for example `https://ticketing.example.ac.ke`). The email links contain signed,
+30-day feedback tokens and must open the frontend, not the backend API. In production,
+do not use a localhost URL.
 
 ### IMAP / Inbound Email Monitoring
 
@@ -84,9 +91,8 @@ LDAP_SEARCH_FILTER=(uid={{username}})
 ### File Uploads
 
 ```env
-MAX_FILE_SIZE=10485760
 MAX_UPLOAD_BYTES=10485760
-MAX_KB_UPLOAD_BYTES=5242880
+MAX_KB_UPLOAD_BYTES=15728640
 UPLOAD_DIR=./uploads
 ```
 
@@ -100,6 +106,20 @@ LDAP_TLS_REJECT_UNAUTHORIZED=true
 JSON_BODY_LIMIT=1mb
 ```
 
+### Initial Administrator
+
+For a new database without an administrator, set these only for the initial seed:
+
+```env
+BOOTSTRAP_ADMIN_USERNAME=
+BOOTSTRAP_ADMIN_EMAIL=
+BOOTSTRAP_ADMIN_NAME=
+BOOTSTRAP_ADMIN_PASSWORD=
+```
+
+The bootstrap password must be at least 16 characters and contain uppercase, lowercase,
+and numeric characters. Remove it from the service environment after the account is created.
+
 ## Frontend Configuration
 
 Create a `.env` file in the `frontend/` directory.
@@ -111,8 +131,11 @@ VITE_API_URL=http://localhost:5000/api
 For production:
 
 ```env
-VITE_API_URL=https://api.example.ac.ke/api
+VITE_API_URL=/api
 ```
+
+Use `/api` with a same-origin reverse proxy, or an HTTPS API URL such as
+`https://api.example.ac.ke/api`. This is a build-time public setting, not a secret.
 
 ## Environment Variable Reference
 
@@ -120,10 +143,12 @@ VITE_API_URL=https://api.example.ac.ke/api
 |----------|---------|----------|---------|
 | `DATABASE_URL` | PostgreSQL connection string | Yes | — |
 | `PORT` | Backend server port | No | `5000` |
+| `HOST` | Backend bind address | No | `0.0.0.0` in development, `127.0.0.1` in production |
 | `NODE_ENV` | Runtime environment | No | `development` |
 | `JWT_SECRET` | JWT signing secret | Yes | — |
-| `JWT_EXPIRES_IN` | Token expiration | No | `7d` |
+| `JWT_EXPIRES_IN` | Token expiration | No | `8h` |
 | `FRONTEND_URL` | Allowed CORS origins | No | `http://localhost:5173,http://localhost:5174` |
+| `CORS_ORIGINS` | Explicit allowed browser origins | Production | — |
 | `PUBLIC_TICKET_API_KEY` | Google Add-on API key | Yes | — |
 | `REQUIRE_PUBLIC_TICKET_API_KEY` | Enforce API key check | No | `true` |
 | `EMAIL_SERVICE` | SMTP provider | No | `gmail` |
@@ -137,9 +162,15 @@ VITE_API_URL=https://api.example.ac.ke/api
 | `IMAP_PASSWORD` | IMAP password | Conditional | — |
 | `USE_LDAP_AUTH` | Enable LDAP login | No | `false` |
 | `LDAP_URL` | LDAP server URL | Conditional | — |
-| `MAX_FILE_SIZE` | Max upload size in bytes | No | `10485760` |
 | `UPLOAD_DIR` | Upload storage path | No | `./uploads` |
+| `MAX_UPLOAD_BYTES` | Maximum ticket attachment size in bytes | No | `10485760` |
+| `MAX_KB_UPLOAD_BYTES` | Maximum knowledge material size in bytes | No | `15728640` |
+| `BOOTSTRAP_ADMIN_USERNAME` | Initial administrator username | New database only | — |
+| `BOOTSTRAP_ADMIN_EMAIL` | Initial administrator email | New database only | — |
+| `BOOTSTRAP_ADMIN_NAME` | Initial administrator display name | New database only | — |
+| `BOOTSTRAP_ADMIN_PASSWORD` | Initial administrator password | New database only | — |
 | `VITE_API_URL` | Frontend API base URL | Yes | — |
+| `ALLOW_PUBLIC_API_KEY_IN_BODY` | Allow non-production API keys in request bodies | No | `false` |
 
 ## Configuration Best Practices
 

@@ -5,7 +5,7 @@ This guide covers setting up the development environment, running the applicatio
 ## Prerequisites Check
 
 ```bash
-# Check Node.js (v20+ required)
+# Check Node.js (v20.19+ or v22.12+ required; use v22.12+ for production)
 node --version
 
 # Check npm (v9+ required)
@@ -64,7 +64,9 @@ cd backend
 npm run preflight
 ```
 
-The preflight script validates the environment configuration and database connectivity.
+The preflight script validates required configuration and the production runtime version.
+It does not connect to PostgreSQL; successful Prisma migration and seed commands verify
+database connectivity.
 
 ## Step 6: Seed the Database
 
@@ -78,12 +80,13 @@ This creates:
 | Entity | Details |
 |--------|---------|
 | Department | ICT department |
-| Admin user | `admin` / `admin123` |
-| Staff user | `itstaff` / `staff123` |
+| Admin user | Created only when bootstrap admin environment variables are set and no admin exists |
 | Default settings | Organization name, colors, SMTP defaults |
 | Email templates | Ticket lifecycle templates |
 
-> **Warning:** Change default passwords before using the system beyond local testing.
+> The login page's demo-account shortcuts are available only in the Vite development build.
+> Create the administrator using the bootstrap environment variables; there are no default
+> production credentials.
 
 ## Step 7: Start the Backend
 
@@ -122,10 +125,8 @@ The frontend starts on `http://localhost:5173` or `http://localhost:5174`.
 
 ## Step 9: Access the Application
 
-Open `http://localhost:5173` in your browser and log in with:
-
-- **Username:** `admin`
-- **Password:** `admin123`
+Open `http://localhost:5173` in your browser and log in with the administrator account
+configured through `BOOTSTRAP_ADMIN_*` before seeding.
 
 ## Available Scripts
 

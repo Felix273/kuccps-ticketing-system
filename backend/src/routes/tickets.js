@@ -1,14 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const fs = require('fs');
-const path = require('path');
 const multer = require('multer');
 const ticketController = require('../controllers/ticketController');
 const { authenticateToken, requireStaffOrAdmin } = require('../middleware/auth');
 const { requirePublicApiKey } = require('../middleware/security');
+const { uploadDir } = require('../services/uploadStorage');
 
-const uploadDir = path.join(__dirname, '../../uploads');
-fs.mkdirSync(uploadDir, { recursive: true });
 const allowedTypes = new Set([
   'image/jpeg',
   'image/png',
@@ -48,6 +45,7 @@ router.post("/", (req, res) => {
 router.get('/', ticketController.getAllTickets);
 router.get('/statistics', ticketController.getStatistics);
 router.get('/:id', ticketController.getTicketById);
+router.get('/:id/attachments/:attachmentId', ticketController.downloadAttachment);
 router.put('/:id', ticketController.updateTicket);
 router.post('/:id/escalate', ticketController.escalateTicket);
 router.post('/:id/comments', ticketController.addComment);

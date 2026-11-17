@@ -2,6 +2,7 @@ const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const { ensureDefaultRoles } = require('../src/services/accessControlService');
 const { seedSlaPolicies } = require('../src/services/slaService');
+const { getDefaultAllowedFileTypesRelation } = require('../src/services/systemSettingsDefaults');
 
 const prisma = new PrismaClient();
 
@@ -51,7 +52,7 @@ async function main() {
   const settingsCount = await prisma.systemSettings.count();
   if (settingsCount === 0) {
     await prisma.systemSettings.create({
-      data: {}
+      data: { allowedFileTypes: getDefaultAllowedFileTypesRelation() }
     });
     console.log('Default system settings created');
   }
@@ -184,20 +185,6 @@ async function main() {
                 <p style="color: #374151; white-space: pre-wrap;">{{resolutionComment}}</p>
               </div>
               {{/if}}
-
-              <!-- 1-Click CSAT Rating Section -->
-              <div style="background-color: white; padding: 24px; border-radius: 12px; margin: 24px 0; border: 2px solid #e5e7eb; text-align: center;">
-                <h3 style="margin-top: 0; color: #111827; font-size: 18px;">How satisfied are you with our service?</h3>
-                <p style="color: #6b7280; font-size: 14px; margin-bottom: 20px;">Please click a rating button below to give your feedback:</p>
-
-                <div style="margin-bottom: 12px;">
-                  <a href="{{csatRatingUrl}}?ticketId={{ticketId}}&rating=5" style="display: block; width: 100%; box-sizing: border-box; background-color: #059669; color: white; text-decoration: none; padding: 12px; border-radius: 8px; font-weight: bold; margin-bottom: 8px; font-size: 14px;">⭐⭐⭐⭐⭐ 5 Stars - Extremely Contented</a>
-                  <a href="{{csatRatingUrl}}?ticketId={{ticketId}}&rating=4" style="display: block; width: 100%; box-sizing: border-box; background-color: #10b981; color: white; text-decoration: none; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 8px; font-size: 14px;">⭐⭐⭐⭐ 4 Stars - Contented</a>
-                  <a href="{{csatRatingUrl}}?ticketId={{ticketId}}&rating=3" style="display: block; width: 100%; box-sizing: border-box; background-color: #3b82f6; color: white; text-decoration: none; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 8px; font-size: 14px;">⭐⭐⭐ 3 Stars - Satisfied (Good)</a>
-                  <a href="{{csatRatingUrl}}?ticketId={{ticketId}}&rating=2" style="display: block; width: 100%; box-sizing: border-box; background-color: #f59e0b; color: white; text-decoration: none; padding: 10px; border-radius: 8px; font-weight: bold; margin-bottom: 8px; font-size: 14px;">⭐⭐ 2 Stars - Discontented</a>
-                  <a href="{{csatRatingUrl}}?ticketId={{ticketId}}&rating=1" style="display: block; width: 100%; box-sizing: border-box; background-color: #dc2626; color: white; text-decoration: none; padding: 10px; border-radius: 8px; font-weight: bold; font-size: 14px;">⭐ 1 Star - Very Discontented</a>
-                </div>
-              </div>
 
               {{csatLinks}}
 

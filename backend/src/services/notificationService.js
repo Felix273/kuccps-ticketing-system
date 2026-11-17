@@ -2,12 +2,6 @@ const { PrismaClient } = require('@prisma/client');
 const { createEmailTransporter, getSystemSettings } = require('./emailService');
 
 const prisma = new PrismaClient();
-const emailPreferenceKeys = new Set([
-  'emailOnAssignment',
-  'emailOnStatusChange',
-  'emailOnNewComment',
-  'escalationAlerts'
-]);
 
 function escapeHtml(value) {
   return String(value || '').replace(/[&<>"']/g, character => ({
@@ -49,22 +43,16 @@ async function createNotification({
   type,
   title,
   message,
-  dedupeKey,
-  emailPreference,
-  ticketNumber,
-  emailEveryTime = false
+  dedupeKey
 }) {
   try {
     let notification;
-    let wasCreated = true;
 
     if (dedupeKey) {
       notification = await prisma.notification.findUnique({
         where: { userId_dedupeKey: { userId, dedupeKey } }
       });
-      if (notification) {
-        wasCreated = false;
-      } else {
+      if (!notification) {
         try {
           notification = await prisma.notification.create({
             data: { userId, ticketId, type, title, message, dedupeKey }
@@ -74,31 +62,12 @@ async function createNotification({
           notification = await prisma.notification.findUnique({
             where: { userId_dedupeKey: { userId, dedupeKey } }
           });
-          wasCreated = false;
         }
       }
     } else {
       notification = await prisma.notification.create({
         data: { userId, ticketId, type, title, message }
       });
-    }
-
-    if (emailPreference && emailPreferenceKeys.has(emailPreference) && (wasCreated || emailEveryTime)) {
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-          email: true,
-          notificationPreference: { select: { [emailPreference]: true } }
-        }
-      });
-      const enabled = user?.notificationPreference?.[emailPreference] ?? true;
-      if (enabled && user?.email) {
-        try {
-          await sendEmailNotification(user.email, { title, message, ticketNumber });
-        } catch (error) {
-          console.error('Notification email failed:', { userId, type, message: error.message });
-        }
-      }
     }
 
     return notification;
@@ -114,9 +83,7 @@ async function createTicketNotification({
   type,
   title,
   message,
-  emailPreference,
-  dedupeKey,
-  emailEveryTime
+  dedupeKey
 }) {
   return createNotification({
     userId,
@@ -124,16 +91,12 @@ async function createTicketNotification({
     type,
     title,
     message,
-    emailPreference,
-    dedupeKey,
-    ticketNumber: ticket.ticketNumber,
-    emailEveryTime
+    dedupeKey
   });
 }
 
 module.exports = {
   createNotification,
   createTicketNotification,
-  sendEmailNotification,
-  emailPreferenceKeys
+  sendEmailNotification
 };

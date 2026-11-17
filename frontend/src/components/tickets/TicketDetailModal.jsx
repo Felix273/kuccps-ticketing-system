@@ -12,6 +12,7 @@ import {
   MessageSquare, 
   Send, 
   Paperclip, 
+  Download,
   Check, 
   XCircle, 
   PlayCircle, 
@@ -49,6 +50,17 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
   const [targetUserId, setTargetUserId] = useState('');
   const [escalationReason, setEscalationReason] = useState('');
   const [isEscalating, setIsEscalating] = useState(false);
+  const [attachments, setAttachments] = useState(ticket.attachments || []);
+
+  useEffect(() => {
+    let active = true;
+    ticketService.getById(ticket.id)
+      .then(response => {
+        if (active && response.success) setAttachments(response.ticket.attachments || []);
+      })
+      .catch(error => console.error('Failed to load ticket attachments:', error));
+    return () => { active = false; };
+  }, [ticket.id]);
 
   useEffect(() => {
     const loadSuggestions = async () => {
@@ -146,6 +158,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
     try {
       const result = await ticketService.addAttachment(ticket.id, file);
       if (result.success) {
+        setAttachments(current => [...current, result.attachment]);
         if (onUpdate) await onUpdate();
       } else {
         alert(result.message || 'Failed to upload attachment');
@@ -155,6 +168,15 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
       alert('Failed to upload attachment');
     } finally {
       event.target.value = '';
+    }
+  };
+
+  const handleAttachmentDownload = async (attachment) => {
+    try {
+      await ticketService.downloadAttachment(ticket.id, attachment.id, attachment.filename);
+    } catch (error) {
+      console.error('Attachment download failed:', error);
+      alert(error.message || 'Failed to download attachment');
     }
   };
 
@@ -407,6 +429,29 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
                   {ticket.description || 'No description provided.'}
                 </div>
               </div>
+
+              {attachments.length > 0 && (
+                <section className="rounded-lg border border-zinc-200 bg-white p-4">
+                  <h3 className="mb-2 font-mono text-[11px] font-bold uppercase tracking-wider text-zinc-700">
+                    Attachments
+                  </h3>
+                  <ul className="space-y-2">
+                    {attachments.map(attachment => (
+                      <li key={attachment.id} className="flex items-center justify-between gap-3 text-xs">
+                        <span className="truncate text-zinc-700">{attachment.filename}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleAttachmentDownload(attachment)}
+                          className="inline-flex shrink-0 items-center gap-1 rounded border border-zinc-200 px-2 py-1 text-zinc-700 hover:bg-zinc-50"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          Download
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
 
               <section className={`rounded-lg border p-4 ${ticket.isOverdue ? 'border-rose-200 bg-rose-50/70' : 'border-zinc-200 bg-white'}`}>
                 <h3 className="mb-3 flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wider text-zinc-700">

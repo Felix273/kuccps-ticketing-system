@@ -4,7 +4,7 @@
  */
 
 const DEFAULT_CONFIG = {
-  API_URL: 'https://store-town-icq-substantially.trycloudflare.com/api',
+  API_URL: '',
   SUPPORT_EMAIL: 'itsupport@kuccps.ac.ke',
   BACKEND_API_KEY: ''
 };
@@ -344,8 +344,11 @@ function submitCsatFeedback(e) {
 
 function submitToBackend(data, url, config) {
   try {
-    if (!/^https?:\/\//i.test(url)) {
-      throw new Error('Backend URL is invalid.');
+    if (!/^https:\/\//i.test(url)) {
+      throw new Error('Set the production HTTPS API_URL in Script Properties.');
+    }
+    if (!config.BACKEND_API_KEY) {
+      throw new Error('Set BACKEND_API_KEY in Script Properties before using ticket intake.');
     }
 
     const headers = {};
@@ -372,7 +375,7 @@ function submitToBackend(data, url, config) {
     } catch (parseError) {
       return {
         success: false,
-        message: 'Backend returned HTTP ' + statusCode + ': ' + responseText.slice(0, 160)
+        message: 'Backend returned an unreadable response (HTTP ' + statusCode + ').'
       };
     }
 
