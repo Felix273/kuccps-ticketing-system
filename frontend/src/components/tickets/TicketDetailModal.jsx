@@ -80,6 +80,17 @@ export const TicketDetailModal = ({ ticket: ticketSummary, onClose, onUpdate, cu
   // Custom Confirmation Dialog State
   const [pendingStatusUpdate, setPendingStatusUpdate] = useState(null);
 
+  // Escape closes the ticket window, unless a dialog inside it is open or a reply is being typed.
+  useEffect(() => {
+    const handleKeyDown = event => {
+      if (event.key !== 'Escape') return;
+      if (actionDialog || showEscalation || pendingStatusUpdate || replyText.trim()) return;
+      onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [actionDialog, showEscalation, pendingStatusUpdate, replyText, onClose]);
+
   useEffect(() => {
     const loadSuggestions = async () => {
       setSuggestionsLoading(true);

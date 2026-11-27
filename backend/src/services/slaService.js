@@ -55,7 +55,7 @@ const SLA_DEFAULT_POLICIES = [
     responseUnit: 'promptly',
     responseTargetPercent: null,
     resolutionValue: 24,
-    resolutionUnit: 'working_hours',
+    resolutionUnit: 'calendar_hours',
     resolutionTargetPercent: null,
     escalationGraceHours: null
   },
@@ -67,7 +67,7 @@ const SLA_DEFAULT_POLICIES = [
     responseUnit: 'promptly',
     responseTargetPercent: null,
     resolutionValue: 24,
-    resolutionUnit: 'working_hours',
+    resolutionUnit: 'calendar_hours',
     resolutionTargetPercent: null,
     escalationGraceHours: null
   },
@@ -79,7 +79,7 @@ const SLA_DEFAULT_POLICIES = [
     responseUnit: 'promptly',
     responseTargetPercent: null,
     resolutionValue: 48,
-    resolutionUnit: 'working_hours',
+    resolutionUnit: 'calendar_hours',
     resolutionTargetPercent: null,
     escalationGraceHours: null
   },

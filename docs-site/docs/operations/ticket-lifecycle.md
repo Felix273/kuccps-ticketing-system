@@ -46,17 +46,17 @@ The officer clicks **Resolve & Close** and completes the resolution record:
 
 ## Categories and Service Charter timelines
 
-Ticket categories are the services in the ICT Service Delivery Charter. Each category has an SLA timeline that can be edited in **Settings → SLA Timelines**.
+Ticket categories are the services in the ICT Service Delivery Charter. Each category has an SLA timeline that can be edited in **Settings → Service Desk → SLA timelines**. Timelines stated in hours run around the clock (calendar hours); timelines stated in days count working days only, excluding weekends and Kenyan public holidays.
 
 | Category | Charter timeline |
 | --- | --- |
-| Equipment Issuance | Immediately to 24 hours |
-| Hardware Support | Immediately to 24 hours |
-| Software Support | Immediately to 48 hours |
-| Provision of Information | Immediately to 7 days |
+| Equipment Issuance | Immediately to 24 hours (calendar hours) |
+| Hardware Support | Immediately to 24 hours (calendar hours) |
+| Software Support | Immediately to 48 hours (calendar hours) |
+| Provision of Information | Immediately to 7 days (working days) |
 | Incident/Problem Resolution | Per the urgency matrix (Very High → Very Low) |
 | Software Development | As per specification |
-| Information Inquiry | Immediately to 3 days |
+| Information Inquiry | Immediately to 3 days (working days) |
 
 Network, email, access and other operational faults are filed under **Incident/Problem Resolution**, where the priority (urgency) sets the response and resolution targets. Older category names (for example "Hardware Issues") are mapped automatically. The web app, the Google Workspace add-on and email intake all use this one list.
 
@@ -136,6 +136,18 @@ The dashboard's **Customer Feedback** panel shows:
 - the 90-day response rate: rated tickets as a share of closed tickets;
 - average rating and number of low ratings (2 stars or below) per officer, and averages per category;
 - the latest low ratings with comments, linked to their tickets for follow-up.
+
+## Go-live mail setup
+
+Local and test environments point at a test mail server (SMTP `127.0.0.1:3025`, IMAP `127.0.0.1:3143`). Before go-live, in **Settings → Email → Mail delivery**:
+
+1. Enter the KUCCPS support mailbox's **SMTP** host, port, TLS setting, username and password.
+2. Enter the same mailbox's **IMAP** host, port, username and password, and keep **Enable Email Monitoring** ticked.
+3. Save, then open **Alerts** in the sidebar, click **Send Test Email**, and confirm it arrives in a real inbox.
+4. Send an email to the support mailbox from a staff account and confirm a ticket is created and the acknowledgement arrives.
+5. Make sure **Test Mode** is off, so requesters receive their emails.
+
+Passwords are stored encrypted and never shown again after saving.
 
 ## Testing email safely
 

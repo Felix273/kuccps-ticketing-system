@@ -302,7 +302,6 @@ export const TicketsView = ({
             { id: 'in-progress', label: 'In Progress', count: segmentCounts.inProgress },
             { id: 'on-hold', label: 'On Hold', count: segmentCounts.onHold },
             { id: 'critical', label: 'Very High', count: segmentCounts.critical, alert: segmentCounts.critical > 0 },
-            { id: 'resolved', label: 'Resolved', count: segmentCounts.resolved },
             { id: 'closed', label: 'Closed', count: segmentCounts.closed }
           ].map(tab => {
             const isActive = activeSegment === tab.id;

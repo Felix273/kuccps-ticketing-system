@@ -65,7 +65,7 @@ export const Sidebar = ({ activeTab, setActiveTab, currentUser, onLogout, mobile
               />
               <div className="min-w-0">
                 <span className="text-xs font-black tracking-tight text-slate-900 block truncate">
-                  KUCCPS IT PORTAL
+                  IT Service Desk
                 </span>
                 <span className="text-[10px] text-slate-400 font-medium block">
                   Support & Services

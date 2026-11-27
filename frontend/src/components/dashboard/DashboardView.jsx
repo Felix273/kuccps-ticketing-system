@@ -42,6 +42,7 @@ const DONUT_COLORS = {
   Closed: '#71717a'
 };
 const ACTIVE_TICKET_STATUSES = new Set(['Open', 'InProgress', 'OnHold']);
+const STATUS_LABELS = { Open: 'Open', InProgress: 'In Progress', OnHold: 'On Hold', Resolved: 'Resolved', Closed: 'Closed' };
 
 const StatusPieTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
@@ -110,7 +111,7 @@ export const DashboardView = ({ refreshKey = 0, onViewTickets }) => {
 
   const totalTickets = overview.total;
   const activeTickets = overview.active;
-  const resolvedTickets = overview.byStatus.Resolved;
+  const closedTickets = overview.byStatus.Closed;
   const slaTicketCount = overview.withSla;
   const slaRate = operationsAnalytics?.slaCompliance;
   const csatRate = operationsAnalytics?.csatSatisfactionRate;
@@ -208,30 +209,30 @@ export const DashboardView = ({ refreshKey = 0, onViewTickets }) => {
           <p className="mt-2 text-[10px] font-mono text-[#990024] group-hover:underline">View tickets</p>
         </button>
 
-        {/* Card 3: Resolved Telemetry Sparkline */}
+        {/* Card 3: Resolved & closed */}
         <button
           type="button"
-          onClick={() => selectStatus('Resolved')}
-          aria-label={`View ${resolvedTickets} currently resolved tickets`}
+          onClick={() => selectStatus('Closed')}
+          aria-label={`View ${closedTickets} resolved and closed tickets`}
           className="group cursor-pointer p-4 flex flex-col justify-between text-left hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#990024]"
         >
           <div className="flex items-center justify-between text-zinc-400 mb-2">
             <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-zinc-500 font-semibold">
-              Currently Resolved
+              Resolved &amp; Closed
             </span>
             <span className="font-mono text-[10px] text-zinc-400">#03</span>
           </div>
 
           <div className="space-y-0.5">
             <div className="font-mono text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-              {resolvedTickets}
+              {closedTickets}
             </div>
             <p className="text-[11px] text-zinc-500 font-mono">
-              Currently in Resolved state
+              Tickets resolved and closed
             </p>
           </div>
 
-          <p className="mt-3 font-mono text-[10px] text-zinc-400">Closed tickets move to the Closed state</p>
+          <p className="mt-3 font-mono text-[10px] text-zinc-400">Resolving closes the ticket and emails the requester</p>
           <p className="mt-2 text-[10px] font-mono text-[#990024] group-hover:underline">View tickets</p>
         </button>
 
@@ -385,7 +386,7 @@ export const DashboardView = ({ refreshKey = 0, onViewTickets }) => {
                   key={item.name}
                   type="button"
                   onClick={() => selectStatus(item.name)}
-                  aria-label={`View ${item.value} ${item.name} tickets`}
+                  aria-label={`View ${item.value} ${STATUS_LABELS[item.name] || item.name} tickets`}
                   className="w-full py-1.5 flex items-center justify-between text-left hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#990024]"
                 >
                   <div className="flex items-center gap-2">
@@ -393,7 +394,7 @@ export const DashboardView = ({ refreshKey = 0, onViewTickets }) => {
                       className="w-2 h-2 rounded-xs" 
                       style={{ backgroundColor: DONUT_COLORS[item.name] || '#a1a1aa' }} 
                     />
-                    <span className="text-zinc-600">{item.name}</span>
+                    <span className="text-zinc-600">{STATUS_LABELS[item.name] || item.name}</span>
                   </div>
                   <span className="font-semibold text-zinc-900 tabular-nums">
                     {item.value} <span className="text-zinc-400 font-normal">({pct}%)</span>
