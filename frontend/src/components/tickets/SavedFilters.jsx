@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Save, Bookmark, Trash2, Share2 } from 'lucide-react';
 import { viewService } from '../../services/viewService';
+import { can } from '../../utils/permissions';
 
 export const SavedFilters = ({ onLoadFilter, currentFilters, currentUser }) => {
   const [savedFilters, setSavedFilters] = useState([]);
@@ -102,15 +103,15 @@ export const SavedFilters = ({ onLoadFilter, currentFilters, currentUser }) => {
             onChange={(e) => setFilterName(e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-2 focus:ring-2 focus:ring-[#911414] focus:border-transparent"
           />
-          {currentUser?.role === 'admin' && isApiBacked && (
+          {can(currentUser, 'tickets.assign') && isApiBacked && (
             <select
               value={visibility}
               onChange={(e) => setVisibility(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-2 focus:ring-2 focus:ring-[#911414] focus:border-transparent"
             >
               <option value="private">Private</option>
-              <option value="public">Shared with everyone</option>
-              <option value="role">Shared with my role</option>
+              <option value="global">Shared with everyone</option>
+              <option value="shared">Shared with my role</option>
             </select>
           )}
           <div className="flex gap-2">

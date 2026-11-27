@@ -294,7 +294,16 @@ exports.syncUsersFromAd = async (req, res) => {
       success: true,
       message: `Synced ${result.count} user(s) from Active Directory`,
       count: result.count,
-      users: result.users
+      // Never return full user records: they include the password hash.
+      users: result.users.map(user => ({
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        department: user.department ? { id: user.department.id, name: user.department.name } : null,
+        lastSyncedAt: user.lastSyncedAt
+      }))
     });
   } catch (error) {
     console.error('AD user sync error:', error);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { settingsService } from '../../services/settingsService';
 import { toast } from 'react-hot-toast';
-import { PRIORITY_LEVELS, normalizePriority } from '../../utils/constants';
+import { ISSUE_CATEGORIES, PRIORITY_LEVELS, normalizePriority } from '../../utils/constants';
 
 const TicketSettings = () => {
   const [settings, setSettings] = useState({});
@@ -60,21 +60,8 @@ const TicketSettings = () => {
               disabled={saving}
             />
             <p className="mt-1 text-xs text-gray-500">
-              Example: TICK (results in TICK-20230101-0001)
+              Ticket numbers look like {(settings.ticketNumberPrefix || 'TICK').toUpperCase()}-20260101-0001 (date in East Africa Time; the sequence restarts daily).
             </p>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Ticket Number Format</label>
-            <select
-              value={settings.ticketNumberFormat || 'YYYYMMDD-XXXX'}
-              onChange={(e) => setSettings(prev => ({...prev, ticketNumberFormat: e.target.value}))}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
-              disabled={saving}
-            >
-              <option value="YYYYMMDD-XXXX">YYYYMMDD-XXXX (e.g., 20230101-0001)</option>
-              <option value="YYYY-XXXX">YYYY-XXXX (e.g., 2023-0001)</option>
-              <option value="XXXX-YYYY">XXXX-YYYY (e.g., 0001-2023)</option>
-            </select>
           </div>
         </div>
       </div>
@@ -95,13 +82,15 @@ const TicketSettings = () => {
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Default Category</label>
-            <input
-              type="text"
-              value={settings.defaultCategory || 'General Issues'}
+            <select
+              value={settings.defaultCategory || 'Incident/Problem Resolution'}
               onChange={(e) => setSettings(prev => ({...prev, defaultCategory: e.target.value}))}
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
               disabled={saving}
-            />
+            >
+              {ISSUE_CATEGORIES.map(category => <option key={category} value={category}>{category}</option>)}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">Used for email tickets. Categories follow the ICT Service Charter and set the SLA timeline.</p>
           </div>
         </div>
         <div className="mt-4">
@@ -113,9 +102,53 @@ const TicketSettings = () => {
             disabled={saving}
           >
             <option value="Open">Open</option>
-            <option value="In Progress">In Progress</option>
-            <option value="On Hold">On Hold</option>
+            <option value="InProgress">In Progress</option>
+            <option value="OnHold">On Hold</option>
           </select>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-lg font-medium mb-4">Lifecycle &amp; Escalation</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">SLA warning threshold (%)</label>
+            <input
+              type="number"
+              min="10"
+              max="99"
+              value={settings.slaWarningPercent ?? 75}
+              onChange={(e) => setSettings(prev => ({...prev, slaWarningPercent: parseInt(e.target.value, 10) || 75}))}
+              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
+              disabled={saving}
+            />
+            <p className="mt-1 text-xs text-gray-500">The assigned officer is warned when this share of the SLA time has been used.</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Reply window (days)</label>
+            <input
+              type="number"
+              min="1"
+              max="90"
+              value={settings.reopenWindowDays ?? 14}
+              onChange={(e) => setSettings(prev => ({...prev, reopenWindowDays: parseInt(e.target.value, 10) || 14}))}
+              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
+              disabled={saving}
+            />
+            <p className="mt-1 text-xs text-gray-500">Replies to a closed ticket within this period are added to it and the officer is alerted (the ticket is not reopened automatically). Later replies open a new ticket.</p>
+          </div>
+        </div>
+        <div className="mt-4">
+          <label className="block text-sm font-medium mb-1">Escalation email recipients</label>
+          <input
+            type="text"
+            placeholder="e.g. ict.head@kuccps.ac.ke, servicedesk.lead@kuccps.ac.ke"
+            value={settings.escalationEmails || ''}
+            onChange={(e) => setSettings(prev => ({...prev, escalationEmails: e.target.value}))}
+            className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
+            disabled={saving}
+          />
+          <p className="mt-1 text-xs text-gray-500">When a ticket exceeds its SLA it is escalated to all administrators, the assigned officer and these addresses.</p>
         </div>
       </div>
 
@@ -148,41 +181,12 @@ const TicketSettings = () => {
         </div>
       </div>
 
-      <div>
-        <h3 className="text-lg font-medium mb-4">System Maintenance</h3>
-        <div className="mb-4">
-          <label className="flex items-center">
-            <input
-              type="checkbox"
-              checked={settings.maintenanceMode || false}
-              onChange={(e) => setSettings(prev => ({...prev, maintenanceMode: e.target.checked}))}
-              disabled={saving}
-            />
-            <span className="ml-2">Enable Maintenance Mode</span>
-          </label>
-          <p className="text-sm text-gray-500 mt-1">
-            When enabled, only administrators can access the system.
-          </p>
-        </div>
-        <div className="mt-4">
-          <label className="block text-sm font-medium mb-1">Maintenance Message</label>
-          <textarea
-            value={settings.maintenanceMessage || ''}
-            onChange={(e) => setSettings(prev => ({...prev, maintenanceMessage: e.target.value}))}
-            rows="4"
-            className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
-            placeholder="System is currently under maintenance. Please check back later."
-            disabled={saving}
-          />
-        </div>
-      </div>
-
       <button
         type="submit"
         disabled={saving}
         className="w-full px-6 py-3 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {saving ? 'Saving...' : 'Save Ticket Settings'}
+        {saving ? 'Saving...' : 'Save Service Desk Settings'}
       </button>
     </form>
   );

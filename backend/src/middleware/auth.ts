@@ -1,5 +1,8 @@
+// Typed mirror of auth.js. The server runs auth.js (Node resolves require('./auth') to .js);
+// this file is type-checked in CI. Keep both in sync when changing authentication.
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma';
+import { getRequestToken, isCsrfSafe } from './sessionCookie';
 import {
   SETTINGS_SECTIONS,
   getRequiredSettingsPermissions,
@@ -23,14 +26,17 @@ interface CurrentUser {
 
 export const authenticateToken = (req: Request, res: Response, next: NextFunction): void => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    const { token, source } = getRequestToken(req);
 
     if (!token) {
       res.status(401).json({
         success: false,
         message: 'Access token required'
       });
+      return;
+    }
+    if (!isCsrfSafe(req, source)) {
+      res.status(403).json({ success: false, message: 'Missing anti-forgery header' });
       return;
     }
 
@@ -43,7 +49,7 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    jwt.verify(token, process.env.JWT_SECRET, async (err: jwt.VerifyErrors | null, tokenUser: unknown) => {
+    jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] }, async (err: jwt.VerifyErrors | null, tokenUser: unknown) => {
       if (err) {
         console.error('JWT verification failed:', err.message);
 
@@ -71,13 +77,21 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
       try {
         const currentUser = await prisma.user.findUnique({
           where: { id: (tokenUser as TokenUser).id },
-          select: { id: true, email: true, username: true, role: true }
+          select: { id: true, email: true, username: true, name: true, role: true, tokensRevokedAt: true }
         });
         if (!currentUser) {
           res.status(401).json({ success: false, message: 'User account is unavailable' });
           return;
         }
-        req.user = { ...(tokenUser as TokenUser), ...currentUser };
+        // Tokens issued before the user's last logout/revocation are no longer valid.
+        const issuedAt = Number((tokenUser as TokenUser).iat) || 0;
+        if (currentUser.tokensRevokedAt &&
+            issuedAt < Math.floor(currentUser.tokensRevokedAt.getTime() / 1000)) {
+          res.status(401).json({ success: false, message: 'Session has ended. Please login again.' });
+          return;
+        }
+        const { tokensRevokedAt: _revokedAt, ...activeUser } = currentUser;
+        req.user = { ...(tokenUser as TokenUser), ...activeUser };
         next();
       } catch (error) {
         console.error('Authentication user lookup error:', error);

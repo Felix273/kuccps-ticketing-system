@@ -17,6 +17,7 @@ export const CsatFeedbackPage = ({ token }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [ticketClosed, setTicketClosed] = useState(false);
+  const [recordedRating, setRecordedRating] = useState(null);
   const [commentSaved, setCommentSaved] = useState(false);
 
   useEffect(() => {
@@ -28,13 +29,15 @@ export const CsatFeedbackPage = ({ token }) => {
         if (!active) return;
         if (result.success) {
           setFeedback(result);
-          // Auto-submit the rating immediately to set status to 'Closed'
+          // Record the rating immediately; the server closes a Resolved ticket.
           try {
-            await operationsService.submitPublicCsat(token, '');
-            setTicketClosed(true);
-          } catch {
-            // Already rated or closed
-            setTicketClosed(true);
+            const submitted = await operationsService.submitPublicCsat(token, '');
+            if (!active) return;
+            // If feedback was already given, show the rating that was actually stored.
+            setRecordedRating(submitted.response?.rating ?? result.rating);
+            setTicketClosed(submitted.ticketStatus === 'Closed');
+          } catch (submitError) {
+            if (active) setError(submitError.message || 'Your rating could not be recorded. Please try again.');
           }
         } else {
           setError(result.message || 'This feedback link is unavailable.');
@@ -84,15 +87,21 @@ export const CsatFeedbackPage = ({ token }) => {
         
         {/* Header */}
         <div className="text-center space-y-2">
-          <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-100">
-            <CheckCircle2 className="w-7 h-7" />
-          </div>
+          {error ? (
+            <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-100">
+              <AlertCircle className="w-7 h-7" />
+            </div>
+          ) : (
+            <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-100">
+              <CheckCircle2 className="w-7 h-7" />
+            </div>
+          )}
 
           <h2 className="text-xl font-bold text-zinc-900 tracking-tight">
-            Thank you for your feedback!
+            {error ? 'We could not record your feedback' : 'Thank you for your feedback!'}
           </h2>
 
-          {feedback && (
+          {feedback && !error && ticketClosed && (
             <p className="font-mono text-xs text-zinc-500">
               Ticket <strong className="text-zinc-900">#{feedback.ticketNumber}</strong> is now officially <span className="text-emerald-700 font-bold uppercase">Closed</span>.
             </p>
@@ -110,12 +119,12 @@ export const CsatFeedbackPage = ({ token }) => {
               {/* Recorded Star Card */}
               <div className="p-4 rounded-xl border border-zinc-200 bg-zinc-50 text-center space-y-1">
                 <div className="flex items-center justify-center gap-1 text-amber-400 text-lg">
-                  {Array.from({ length: feedback.rating || 5 }).map((_, i) => (
+                  {Array.from({ length: recordedRating || feedback.rating || 5 }).map((_, i) => (
                     <Star key={i} className="w-5 h-5 fill-current" />
                   ))}
                 </div>
                 <p className="font-mono text-xs font-bold text-zinc-800">
-                  {feedback.rating} Stars — {RATING_LABELS[feedback.rating] || 'Satisfied'}
+                  {recordedRating || feedback.rating} Stars — {RATING_LABELS[recordedRating || feedback.rating] || 'Satisfied'}
                 </p>
                 <p className="text-[11px] text-zinc-400 font-mono">
                   Feedback registered in ICT Directorate analytics.

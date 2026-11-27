@@ -31,3 +31,6 @@ test_*.js
 *.sln
 *.sw?
 .aider*
+
+# Uploaded files (runtime data)
+backend/uploads/

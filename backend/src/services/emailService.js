@@ -9,6 +9,20 @@ const {
   removeLegacyCsatSection,
   renderCsatLinks
 } = require('./csatService');
+const { normalizePriority, normalizeStatus, normalizeCategory } = require('./ticketEnums');
+const { EVENTS, recordTicketEvent } = require('./ticketActivity');
+// notificationService imports this module, so it is required lazily to avoid a cycle.
+const createTicketNotification = (...args) => require('./notificationService').createTicketNotification(...args);
+
+function formatExpectedDate(date) {
+  return new Date(date).toLocaleString('en-GB', {
+    timeZone: process.env.TICKET_TIMEZONE || 'Africa/Nairobi',
+    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  }) + ' (EAT)';
+}
+const { createTicketWithNumber } = require('./ticketNumber');
+const { escapeHtml, textToHtml, safeColor } = require('../utils/html');
+const { encryptSecret, withDecryptedSecrets } = require('./secretBox');
 
 const prisma = require('../lib/prisma');
 
@@ -19,11 +33,11 @@ function getInitialEmailSettings() {
     smtpPort: parseInt(process.env.SMTP_PORT || process.env.EMAIL_SMTP_PORT, 10) || 587,
     smtpSecure: String(process.env.SMTP_SECURE || process.env.EMAIL_SMTP_SECURE || '').toLowerCase() === 'true',
     smtpUser: process.env.SMTP_USER || process.env.EMAIL_USER || null,
-    smtpPassword: process.env.SMTP_PASSWORD || process.env.EMAIL_PASSWORD || null,
+    smtpPassword: encryptSecret(process.env.SMTP_PASSWORD || process.env.EMAIL_PASSWORD || null),
     imapHost: process.env.IMAP_HOST || 'imap.gmail.com',
     imapPort: parseInt(process.env.IMAP_PORT, 10) || 993,
     imapUser: process.env.IMAP_USER || process.env.EMAIL_USER || null,
-    imapPassword: process.env.IMAP_PASSWORD || null,
+    imapPassword: encryptSecret(process.env.IMAP_PASSWORD || null),
     imapEnabled: String(process.env.IMAP_ENABLED || '').toLowerCase() === 'true',
     imapPollInterval: parseInt(process.env.EMAIL_POLL_INTERVAL || process.env.IMAP_POLL_INTERVAL, 10) || 5
   };
@@ -57,16 +71,20 @@ async function getSystemSettings() {
     });
   }
 
-  // Update cache
-  settingsCache = settings;
+  // Update cache (credentials decrypted for internal use; never sent to clients)
+  settingsCache = withDecryptedSecrets(settings);
+  settings = settingsCache;
   settingsCacheTimestamp = now;
 
   return settings;
 }
 
+// Clears both the settings and the email-template caches so admin edits apply immediately.
 function clearSettingsCache() {
   settingsCache = null;
   settingsCacheTimestamp = null;
+  templatesCache = null;
+  templatesCacheTimestamp = null;
 }
 
 // Get email templates with caching
@@ -159,45 +177,49 @@ async function sendEmail(to, templateType, data) {
 
     // Replace common placeholders. Support both legacy [PLACEHOLDER] tokens and
     // the newer {{camelCase}} template tokens used by the admin reset defaults.
-    const replacements = {
-      '[TICKET_NUMBER]': data.ticketNumber || '',
-      '{{ticketNumber}}': data.ticketNumber || '',
-      '[SUBJECT]': data.subject || '',
-      '{{subject}}': data.subject || '',
-      '[DESCRIPTION]': data.description || '',
-      '{{description}}': data.description || '',
-      '[PRIORITY]': data.priority || '',
-      '{{priority}}': data.priority || '',
-      '[STATUS]': data.status || '',
-      '{{status}}': data.status || '',
-      '[CATEGORY]': data.category || '',
-      '{{category}}': data.category || '',
-      '[REQUESTER_NAME]': data.requesterName || '',
-      '{{requesterName}}': data.requesterName || '',
-      '[REQUESTER_EMAIL]': data.requesterEmail || '',
-      '{{requesterEmail}}': data.requesterEmail || '',
-      '[COMMENT]': data.comment || '',
-      '{{comment}}': data.comment || '',
-      '[RESOLUTION_COMMENT]': data.resolutionComment || '',
-      '{{resolutionComment}}': data.resolutionComment || '',
-      '[YEAR]': new Date().getFullYear().toString(),
-      '{{year}}': new Date().getFullYear().toString(),
-      '[ORGANIZATION_NAME]': settings.organizationName || 'KUCCPS IT Support',
-      '{{organizationName}}': settings.organizationName || 'KUCCPS IT Support',
-      '[EMAIL_FROM_NAME]': settings.emailFromName || 'KUCCPS IT Support',
-      '{{emailFromName}}': settings.emailFromName || 'KUCCPS IT Support',
-      '[SUPPORT_EMAIL]': settings.supportEmail || 'itsupport@kuccps.ac.ke',
-      '{{supportEmail}}': settings.supportEmail || 'itsupport@kuccps.ac.ke',
-      '[NOREPLY_EMAIL]': settings.noreplyEmail || settings.supportEmail || 'noreply@kuccps.ac.ke',
-      '{{noreplyEmail}}': settings.noreplyEmail || settings.supportEmail || 'noreply@kuccps.ac.ke',
-      '{{primaryColor}}': settings.primaryColor || '#911414',
-      '{{secondaryColor}}': settings.secondaryColor || '#d20001',
-      '{{csatLinks}}': templateType === 'ticketResolved' && data.id && data.requesterEmail
-        ? renderCsatLinks(data, settings.primaryColor || '#911414')
-        : '',
-      '{{ticketId}}': data.id || '',
-      '{{csatRatingUrl}}': `${process.env.FRONTEND_URL || 'https://itsupport.kuccps.ac.ke'}/api/operations/csat/rate`
+    // Text values come from requesters and staff, so they are HTML-escaped in the
+    // body (the subject line is plain text and uses the raw values).
+    const primaryColor = safeColor(settings.primaryColor, '#911414');
+    const textValues = {
+      TICKET_NUMBER: ['ticketNumber', data.ticketNumber],
+      SUBJECT: ['subject', data.subject],
+      DESCRIPTION: ['description', data.description],
+      PRIORITY: ['priority', data.priority],
+      STATUS: ['status', data.status],
+      CATEGORY: ['category', data.category],
+      REQUESTER_NAME: ['requesterName', data.requesterName],
+      REQUESTER_EMAIL: ['requesterEmail', data.requesterEmail],
+      COMMENT: ['comment', data.comment],
+      RESOLUTION_COMMENT: ['resolutionComment', data.resolutionComment],
+      YEAR: ['year', new Date().getFullYear().toString()],
+      ORGANIZATION_NAME: ['organizationName', settings.organizationName || 'KUCCPS IT Support'],
+      EMAIL_FROM_NAME: ['emailFromName', settings.emailFromName || 'KUCCPS IT Support'],
+      SUPPORT_EMAIL: ['supportEmail', settings.supportEmail || 'itsupport@kuccps.ac.ke'],
+      NOREPLY_EMAIL: ['noreplyEmail', settings.noreplyEmail || settings.supportEmail || 'noreply@kuccps.ac.ke']
     };
+    const subjectReplacements = {};
+    const replacements = {};
+    for (const [legacyToken, [camelToken, value]] of Object.entries(textValues)) {
+      const raw = String(value ?? '');
+      subjectReplacements[`[${legacyToken}]`] = raw;
+      subjectReplacements[`{{${camelToken}}}`] = raw;
+      replacements[`[${legacyToken}]`] = textToHtml(raw);
+      replacements[`{{${camelToken}}}`] = textToHtml(raw);
+    }
+    const secondaryColor = safeColor(settings.secondaryColor, '#d20001');
+    Object.assign(replacements, {
+      '{{primaryColor}}': primaryColor,
+      '{{secondaryColor}}': secondaryColor,
+      '[PRIMARY_COLOR]': primaryColor,
+      '[SECONDARY_COLOR]': secondaryColor,
+      '{{expectedResolution}}': escapeHtml(data.expectedResolution || ''),
+      '[EXPECTED_RESOLUTION]': escapeHtml(data.expectedResolution || ''),
+      '{{csatLinks}}': templateType === 'ticketResolved' && data.id && data.requesterEmail
+        ? renderCsatLinks(data, primaryColor)
+        : '',
+      '{{ticketId}}': escapeHtml(data.id || ''),
+      '{{csatRatingUrl}}': escapeHtml(`${process.env.FRONTEND_URL || 'https://itsupport.kuccps.ac.ke'}/api/operations/csat/rate`)
+    });
 
     html = html
       .replace(/{{#if comment}}([\s\S]*?){{\/if}}/g, data.comment ? '$1' : '')
@@ -213,9 +235,22 @@ async function sendEmail(to, templateType, data) {
 
     // Apply replacements literally. Do not use RegExp here: legacy tokens like
     // [TICKET_NUMBER] contain regex metacharacters and would corrupt templates.
-    for (const [placeholder, value] of Object.entries(replacements)) {
+    for (const [placeholder, value] of Object.entries(subjectReplacements)) {
       subject = replaceAllLiteral(subject, placeholder, value);
+    }
+    const templateHasExpectedDate = /\{\{expectedResolution\}\}|\[EXPECTED_RESOLUTION\]/.test(html);
+    for (const [placeholder, value] of Object.entries(replacements)) {
       html = replaceAllLiteral(html, placeholder, value);
+    }
+
+    // The acknowledgement always states the Service Charter resolution target, even if an
+    // administrator's template does not include the {{expectedResolution}} placeholder.
+    if (data.expectedResolution && !templateHasExpectedDate) {
+      const notice = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0"><tr><td style="padding:14px 16px;border:1px solid #e4e4e7;border-left:4px solid ${primaryColor};border-radius:6px;font-family:Arial,sans-serif;font-size:13px;color:#18181b">` +
+        `<strong>Expected resolution:</strong> ${escapeHtml(data.expectedResolution)}<br>` +
+        '<span style="color:#71717a">Based on the ICT Service Charter. We will email you if this changes. No action is required from you unless an officer contacts you.</span>' +
+        '</td></tr></table>';
+      html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${notice}</body>`) : `${html}${notice}`;
     }
 
     if (templateType === 'ticketResolved' && data.id && data.requesterEmail) {
@@ -223,7 +258,7 @@ async function sendEmail(to, templateType, data) {
       // When {{csatLinks}} was present it was already replaced above; calling
       // ensureWorkingCsatLinks unconditionally would append a duplicate block.
       if (!hadCsatLinksPlaceholder) {
-        html = ensureWorkingCsatLinks(html, data, settings.primaryColor || '#911414');
+        html = ensureWorkingCsatLinks(html, data, primaryColor);
       }
     }
 
@@ -239,9 +274,12 @@ async function sendEmail(to, templateType, data) {
     const supportAddress = settings.supportEmail || authenticatedSender;
     const noReplyAddress = settings.noreplyEmail || supportAddress;
     const fromAddress = authenticatedSender || supportAddress;
+    // Test mode: every email goes to the ICT test mailbox instead of real users.
+    const testAddress = settings.emailTestMode && settings.emailTestAddress ? settings.emailTestAddress : null;
+    if (testAddress) subject = `[TEST → ${to}] ${subject}`;
     const mailOptions = {
-      from: `${settings.emailFromName} <${fromAddress}>`,
-      to: to,
+      from: { name: settings.emailFromName || 'KUCCPS IT Support', address: fromAddress },
+      to: testAddress || to,
       subject: subject,
       html: html,
       ...(noReplyAddress ? { replyTo: noReplyAddress } : {}),
@@ -268,126 +306,224 @@ async function sendTicketReply(ticket, comment) {
   });
 }
 
-// Generate ticket number in format from settings
+// Legacy export kept for callers; new tickets use createTicketWithNumber().
 async function generateTicketNumber() {
-  const settings = await getSystemSettings();
-  const date = new Date();
-  const dateStr = date.getFullYear().toString() +
-    String(date.getMonth() + 1).padStart(2, '0') +
-    String(date.getDate()).padStart(2, '0');
-  const todayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
-  const count = await prisma.ticket.count({
-    where: { createdAt: { gte: todayStart, lt: todayEnd } }
-  });
-
-  // Use dynamic prefix from settings
-  const prefix = settings.ticketNumberPrefix || 'TICK';
-  return `${prefix}-${dateStr}-${String(count + 1).padStart(4, '0')}`;
+  const { nextTicketNumber } = require('./ticketNumber');
+  return nextTicketNumber(prisma);
 }
 
-// Parse incoming email and create ticket
+const MAX_EMAIL_BODY_LENGTH = 10000;
+const AUTOMATED_SENDER_PATTERN = /^(mailer-daemon|postmaster|no-?reply|do-?not-?reply|bounce[s]?)@/i;
+
+function htmlToText(html) {
+  return String(html || '')
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function getEmailBody(parsed) {
+  const text = parsed.text || htmlToText(parsed.html) || 'No content';
+  return text.replace(/\u0000/g, '').trim().slice(0, MAX_EMAIL_BODY_LENGTH) || 'No content';
+}
+
+// Auto-replies, bounces and list mail must never open tickets or trigger
+// confirmations, otherwise two auto-responders can loop indefinitely.
+function isAutomatedMessage(parsed, from, ownAddresses) {
+  const autoSubmitted = String(parsed.headers?.get('auto-submitted') || '').toLowerCase();
+  if (autoSubmitted && autoSubmitted !== 'no') return true;
+  const precedence = String(parsed.headers?.get('precedence') || '').toLowerCase();
+  if (['bulk', 'junk', 'list', 'auto_reply'].includes(precedence)) return true;
+  if (parsed.headers?.has('x-autoreply') || parsed.headers?.has('x-autorespond')) return true;
+  if (AUTOMATED_SENDER_PATTERN.test(from)) return true;
+  return ownAddresses.has(from);
+}
+
+// Only trust a sender's identity for staff attribution when the receiving
+// server did not record an SPF/DKIM/DMARC failure for the message.
+function hasFailedSenderAuthentication(parsed) {
+  const results = parsed.headers?.get('authentication-results');
+  const text = (Array.isArray(results) ? results.join(' ') : String(results || '')).toLowerCase();
+  return /\b(dmarc|spf|dkim)=(fail|softfail|permerror)\b/.test(text);
+}
+
+async function claimMessageId(messageId) {
+  if (!messageId) return true;
+  try {
+    await prisma.processedEmail.create({ data: { messageId } });
+    return true;
+  } catch (error) {
+    if (error.code === 'P2002') return false;
+    throw error;
+  }
+}
+
+async function releaseMessageId(messageId) {
+  if (!messageId) return;
+  await prisma.processedEmail.delete({ where: { messageId } }).catch(() => null);
+}
+
+// Parse an incoming email and either add it to an existing ticket or open a new one.
 async function processIncomingEmail(emailData) {
+  let claimedMessageId = null;
   try {
     const parsed = await simpleParser(emailData);
+    const from = String(parsed.from?.value?.[0]?.address || '').trim().toLowerCase();
+    if (!from) return { success: false, skipped: true, reason: 'missing sender' };
 
-    // Extract email details
-    const from = parsed.from.value[0].address;
-    const subject = parsed.subject || 'No Subject';
-    const body = parsed.text || parsed.html || 'No content';
+    const settings = await getSystemSettings();
+    const ownAddresses = new Set([
+      settings.smtpUser, settings.supportEmail, settings.noreplyEmail, settings.imapUser,
+      process.env.EMAIL_USER, process.env.IMAP_USER, process.env.SUPPORT_EMAIL
+    ].filter(Boolean).map(address => String(address).toLowerCase()));
+    if (isAutomatedMessage(parsed, from, ownAddresses)) {
+      console.log('Skipped automated/self-sent email from', from);
+      return { success: true, skipped: true, reason: 'automated message' };
+    }
+
+    const messageId = parsed.messageId || null;
+    if (!(await claimMessageId(messageId))) {
+      return { success: true, skipped: true, reason: 'already processed' };
+    }
+    claimedMessageId = messageId;
+
+    const subject = String(parsed.subject || 'No Subject').replace(/\u0000/g, '').trim() || 'No Subject';
+    const body = getEmailBody(parsed);
     const emailReferences = [
       parsed.inReplyTo,
       ...(Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : [])
     ].filter(Boolean);
 
-    // Get settings for ticket number prefix
-    const settings = await getSystemSettings();
-    const prefixRegex = settings.ticketNumberPrefix || 'TICK';
-    const escapedPrefix = prefixRegex.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const ticketNumberMatch = `${subject}\n${body}`.match(new RegExp(`(?:Ticket\\s*#)?(${escapedPrefix}-\\d{8}-\\d{4})`, 'i'));
-
+    // Match replies by the ticket number in the subject, then by mail threading headers.
+    const escapedPrefix = (settings.ticketNumberPrefix || 'TICK').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const ticketNumberMatch = subject.match(new RegExp(`(${escapedPrefix}-\\d{8}-\\d{4,})`, 'i'));
     let ticket = null;
-    let ticketNumber = null;
-
     if (ticketNumberMatch) {
-      ticketNumber = ticketNumberMatch[1];
-      ticket = await prisma.ticket.findFirst({ where: { ticketNumber } });
+      ticket = await prisma.ticket.findFirst({ where: { ticketNumber: ticketNumberMatch[1].toUpperCase() } });
     }
-
     if (!ticket && emailReferences.length > 0) {
-      ticket = await prisma.ticket.findFirst({
-        where: {
-          emailMessageId: { in: emailReferences }
-        }
-      });
-      ticketNumber = ticket?.ticketNumber || null;
+      ticket = await prisma.ticket.findFirst({ where: { emailMessageId: { in: emailReferences } } });
     }
 
-    if (ticket) {
-      // Resolve the comment author when the sender is a staff user. External
-      // requester replies are stored with a null userId and shown as received.
-      let userId = null;
-      try {
-        const commentAuthor = await prisma.user.findUnique({
-          where: { email: from },
-          select: { id: true, role: true }
+    const senderUser = await prisma.user.findUnique({
+      where: { email: from },
+      select: { id: true, role: true }
+    });
+    const senderIsStaff = ['staff', 'admin'].includes(senderUser?.role) && !hasFailedSenderAuthentication(parsed);
+
+    // A reply is accepted only from the ticket's requester or ICT staff. Anyone else
+    // quoting a ticket number gets a new ticket instead of writing into someone else's.
+    const isRequester = Boolean(ticket) && ticket.requesterEmail.toLowerCase() === from;
+    const isFinished = Boolean(ticket) && ['Resolved', 'Closed'].includes(ticket.status);
+    const reopenWindowMs = (settings.reopenWindowDays ?? 14) * 24 * 60 * 60 * 1000;
+    const finishedAt = ticket?.closedAt || ticket?.resolvedAt;
+    const withinReopenWindow = !finishedAt || Date.now() - new Date(finishedAt).getTime() <= reopenWindowMs;
+
+    // A requester replying to a long-closed ticket gets a new ticket instead of a reopen.
+    if (ticket && (senderIsStaff || (isRequester && (!isFinished || withinReopenWindow)))) {
+      if (isRequester && isFinished) {
+        // Team decision: a requester's reply never reopens a closed ticket. The reply is kept
+        // on the ticket and the officer is alerted so they can reopen it if needed.
+        await recordTicketEvent(prisma, {
+          ticketId: ticket.id,
+          field: EVENTS.emailReply,
+          newValue: 'Requester replied after closure',
+          actor: { id: from, name: `Requester (${from})` },
+          note: body.slice(0, 500)
         });
-        userId = commentAuthor?.id || null;
-        if (ticket && ['staff', 'admin'].includes(commentAuthor?.role) && !ticket.firstRespondedAt) {
-          const respondedAt = new Date();
-          await prisma.ticket.update({
-            where: { id: ticket.id },
-            data: {
-              firstRespondedAt: respondedAt,
-              slaBreached: ticket.slaBreached || getTicketSlaChecks({
-                ...ticket,
-                firstRespondedAt: respondedAt
-              }, respondedAt).some(check => !check),
-              responseTime: Math.floor((respondedAt - new Date(ticket.createdAt)) / 60000)
-            }
-          });
+        const recipients = ticket.assignedToId
+          ? [ticket.assignedToId]
+          : (await prisma.user.findMany({ where: { role: 'admin' }, select: { id: true } })).map(user => user.id);
+        for (const userId of recipients) {
+          await createTicketNotification({
+            userId,
+            ticket,
+            type: 'comment',
+            title: 'Requester replied to a closed ticket',
+            message: `${ticket.ticketNumber}: review the reply and reopen the ticket if the issue persists`
+          }).catch(() => null);
         }
-      } catch (userErr) {
-        console.log('Could not resolve comment author:', userErr.message);
+      }
+      if (senderIsStaff && !ticket.firstRespondedAt) {
+        const respondedAt = new Date();
+        await prisma.ticket.update({
+          where: { id: ticket.id },
+          data: {
+            firstRespondedAt: respondedAt,
+            slaBreached: ticket.slaBreached || getTicketSlaChecks({
+              ...ticket,
+              firstRespondedAt: respondedAt
+            }, respondedAt).some(check => !check),
+            responseTime: Math.floor((respondedAt - new Date(ticket.createdAt)) / 60000)
+          }
+        });
       }
 
       await prisma.comment.create({
         data: {
           ticketId: ticket.id,
-          userId: userId,
+          userId: senderIsStaff ? senderUser.id : null,
           content: body,
           isInternal: false
         }
       });
 
-      if (!ticket.emailMessageId && parsed.messageId) {
-        await prisma.ticket.update({
-          where: { id: ticket.id },
-          data: { emailMessageId: parsed.messageId }
-        });
+      if (!ticket.emailMessageId && messageId) {
+        await prisma.ticket.update({ where: { id: ticket.id }, data: { emailMessageId: messageId } });
+      }
+      if (messageId) {
+        await prisma.processedEmail.update({ where: { messageId }, data: { ticketId: ticket.id } }).catch(() => null);
       }
 
-      console.log(`Added reply to ticket ${ticketNumber}`);
-      return { success: true, ticketNumber, isReply: true };
+      // Tell the officer the requester replied (closed tickets are alerted above).
+      if (isRequester && !isFinished) {
+        const { notifyPermissionHolders } = require('./notificationService');
+        const alert = {
+          ticket,
+          type: 'comment',
+          title: 'Requester replied',
+          message: `${ticket.ticketNumber}: ${body.slice(0, 300)}`
+        };
+        if (ticket.assignedToId) {
+          await createTicketNotification({ userId: ticket.assignedToId, ...alert }).catch(() => null);
+        } else {
+          await notifyPermissionHolders({ permission: 'tickets.assign', ...alert }).catch(() => null);
+        }
+      }
+
+      console.log(`Added email reply to ticket ${ticket.ticketNumber}`);
+      return { success: true, ticketNumber: ticket.ticketNumber, isReply: true };
     }
 
-    // Create new ticket with same format used by the main app
-    const newTicketNumber = await generateTicketNumber();
     const createdAt = new Date();
-    const category = settings.defaultCategory || 'General Issues';
-    const priority = settings.defaultPriority || 'Medium';
+    const category = normalizeCategory(settings.defaultCategory);
+    const priority = normalizePriority(settings.defaultPriority) || 'Medium';
     const slaDeadlines = await getConfiguredTicketSlaDeadlines(prisma, category, priority, createdAt);
+    const requesterName = String(parsed.from?.value?.[0]?.name || '').trim().slice(0, 160) || null;
 
-    const newTicket = await prisma.ticket.create({
+    const newTicket = await createTicketWithNumber(ticketNumber => prisma.ticket.create({
       data: {
-        ticketNumber: newTicketNumber,
+        ticketNumber,
         subject: subject.substring(0, 255),
         description: body,
         requesterEmail: from,
-        status: settings.defaultStatus || 'Open',
+        requesterName,
+        status: normalizeStatus(settings.defaultStatus) || 'Open',
         priority,
         category,
-        emailMessageId: parsed.messageId || null,
+        createdById: senderUser?.id || null,
+        departmentId: null,
+        emailMessageId: messageId,
         createdAt,
         responseDueAt: slaDeadlines.responseDueAt,
         slaDueAt: slaDeadlines.slaDueAt,
@@ -396,10 +532,20 @@ async function processIncomingEmail(emailData) {
         slaResolutionTargetPercent: slaDeadlines.slaResolutionTargetPercent,
         slaBreached: false
       }
-    });
+    }));
+    if (messageId) {
+      await prisma.processedEmail.update({ where: { messageId }, data: { ticketId: newTicket.id } }).catch(() => null);
+    }
 
-    // Send confirmation email
-    const emailResult = await sendEmail(from, 'ticketCreated', newTicket);
+    const expectedResolution = newTicket.slaDueAt ? formatExpectedDate(newTicket.slaDueAt) : null;
+    await recordTicketEvent(prisma, {
+      ticketId: newTicket.id,
+      field: EVENTS.created,
+      newValue: newTicket.ticketNumber,
+      actor: { id: from, name: requesterName || from },
+      note: `Received by email${expectedResolution ? `; expected resolution ${expectedResolution}` : ''}`
+    });
+    const emailResult = await sendEmail(from, 'ticketCreated', { ...newTicket, expectedResolution });
     if (!newTicket.emailMessageId && emailResult.success && emailResult.messageId) {
       await prisma.ticket.update({
         where: { id: newTicket.id },
@@ -407,94 +553,187 @@ async function processIncomingEmail(emailData) {
       });
     }
 
-    console.log(`Created new ticket ${newTicketNumber} from email`);
-    return { success: true, ticketNumber: newTicketNumber, isReply: false };
+    // Alert the service desk that a new ticket is waiting in the queue.
+    await require('./notificationService').notifyPermissionHolders({
+      permission: 'tickets.work',
+      ticket: newTicket,
+      type: 'new_ticket',
+      title: 'New ticket in the queue',
+      message: `${newTicket.ticketNumber}: ${newTicket.subject}\nFrom: ${from} · ${newTicket.category} · ${newTicket.priority}${expectedResolution ? `\nExpected resolution: ${expectedResolution}` : ''}`
+    }).catch(error => console.error('New ticket alert failed:', error.message));
+
+    console.log(`Created new ticket ${newTicket.ticketNumber} from email`);
+    return { success: true, ticketNumber: newTicket.ticketNumber, isReply: false };
   } catch (error) {
-    console.error('Error processing email:', error);
+    // Allow a later poll to retry a message whose processing failed part-way.
+    await releaseMessageId(claimedMessageId);
+    console.error('Error processing email:', error.message);
     return { success: false, error: error.message };
   }
 }
 
-// Monitor inbox for new emails
+// IMAP connection settings: Settings → Email when inbound email is enabled there,
+// otherwise the IMAP_* environment variables. Returns null when neither is configured.
+async function getImapConfig() {
+  clearSettingsCache();
+  const settings = await getSystemSettings();
+  if (settings.imapEnabled && settings.imapHost && settings.imapUser && settings.imapPassword) {
+    const port = settings.imapPort || 993;
+    return {
+      user: settings.imapUser,
+      password: settings.imapPassword,
+      host: settings.imapHost,
+      port,
+      // 993 (IMAPS) is encrypted; 143/3143 are plain IMAP (allowed only outside production).
+      tls: !(process.env.NODE_ENV !== 'production' && [143, 3143].includes(Number(port)))
+    };
+  }
+  if (process.env.IMAP_HOST && process.env.IMAP_USER && process.env.IMAP_PASSWORD) {
+    return {
+      user: process.env.IMAP_USER,
+      password: process.env.IMAP_PASSWORD,
+      host: process.env.IMAP_HOST,
+      port: parseInt(process.env.IMAP_PORT, 10) || 993,
+      tls: String(process.env.IMAP_TLS || 'true').toLowerCase() !== 'false'
+    };
+  }
+  return null;
+}
+
+function readStream(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on('data', chunk => chunks.push(chunk));
+    stream.once('end', () => resolve(Buffer.concat(chunks)));
+    stream.once('error', reject);
+  });
+}
+
+// Monitor the inbox: process UNSEEN messages, flag each as \Seen only after it has
+// been handled, and reconnect with backoff if the connection drops.
 function startEmailMonitoring() {
   const rejectUnauthorized = String(process.env.IMAP_TLS_REJECT_UNAUTHORIZED || 'true').toLowerCase() !== 'false';
-  const imap = new Imap({
-    user: process.env.IMAP_USER,
-    password: process.env.IMAP_PASSWORD,
-    host: process.env.IMAP_HOST,
-    port: parseInt(process.env.IMAP_PORT) || 993,
-    tls: process.env.IMAP_TLS === 'true',
-    tlsOptions: { rejectUnauthorized }
-  });
+  const envPollMinutes = parseInt(process.env.EMAIL_POLL_INTERVAL || process.env.IMAP_POLL_INTERVAL, 10) || 5;
+  let imap = null;
+  let processing = false;
+  let pendingRun = false;
+  let reconnectDelayMs = 5000;
+  let reconnectTimer = null;
 
-  function openInbox(cb) {
-    imap.openBox('INBOX', false, cb);
-  }
+  function processUnseen() {
+    if (!imap || imap.state !== 'authenticated') return;
+    if (processing) {
+      pendingRun = true;
+      return;
+    }
+    processing = true;
+    const connection = imap;
 
-  imap.once('ready', function() {
-    console.log('✓ Email monitoring started');
-    openInbox(function(err, box) {
-      if (err) throw err;
+    connection.search(['UNSEEN'], (searchError, uids) => {
+      if (searchError || !uids?.length) {
+        if (searchError) console.error('IMAP search error:', searchError.message);
+        finishRun();
+        return;
+      }
 
-      console.log('✓ Connected to inbox');
-
-      // Listen for new emails
-      imap.on('mail', function(numNewMsgs) {
-        console.log(`${numNewMsgs} new email(s) received`);
-
-        const fetch = imap.seq.fetch(box.messages.total + ':*', {
-          bodies: '',
-          struct: true
-        });
-
-        fetch.on('message', function(msg) {
-          msg.on('body', function(stream) {
-            processIncomingEmail(stream);
-          });
-        });
+      const messages = [];
+      const fetch = connection.fetch(uids, { bodies: '', markSeen: false });
+      fetch.on('message', msg => {
+        const message = { uid: null, body: null };
+        messages.push(message);
+        msg.once('attributes', attrs => { message.uid = attrs.uid; });
+        msg.on('body', stream => { message.body = readStream(stream); });
+      });
+      fetch.once('error', fetchError => console.error('IMAP fetch error:', fetchError.message));
+      fetch.once('end', async () => {
+        for (const message of messages) {
+          try {
+            const result = await processIncomingEmail(await message.body);
+            if (result.success && message.uid) {
+              await new Promise(resolve => connection.addFlags(message.uid, '\\Seen', () => resolve()));
+            }
+          } catch (error) {
+            console.error('Inbound email handling failed:', error.message);
+          }
+        }
+        finishRun();
       });
     });
-  });
-
-  imap.once('error', function(err) {
-    console.error('IMAP error:', err);
-  });
-
-  imap.once('end', function() {
-    console.log('IMAP connection ended');
-  });
-
-  imap.connect();
-
-  // Periodic fallback poll using node-cron to catch missed emails
-  const pollInterval = parseInt(process.env.EMAIL_POLL_INTERVAL) || 5;
-  if (cron.validate(`*/${pollInterval} * * * *`)) {
-    cron.schedule(`*/${pollInterval} * * * *`, async () => {
-      try {
-        if (!imap || imap.state !== 'authenticated') return;
-        imap.openBox('INBOX', false, (err, box) => {
-          if (err) {
-            console.error('Cron poll openInbox error:', err.message);
-            return;
-          }
-          const fetch = imap.seq.fetch(`${box.messages.total}:*`, {
-            bodies: '',
-            struct: true
-          });
-          fetch.on('message', function(msg) {
-            msg.on('body', function(stream) {
-              processIncomingEmail(stream);
-            });
-          });
-        });
-      } catch (e) {
-        console.error('Cron poll error:', e.message);
-      }
-    });
-    console.log(`✓ Email polling fallback scheduled every ${pollInterval} minutes`);
   }
 
-  return imap;
+  function finishRun() {
+    processing = false;
+    if (pendingRun) {
+      pendingRun = false;
+      setImmediate(processUnseen);
+    }
+  }
+
+  function scheduleReconnect() {
+    if (reconnectTimer) return;
+    console.log(`IMAP reconnecting in ${Math.round(reconnectDelayMs / 1000)}s`);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect().catch(error => {
+        console.error('IMAP connection setup failed:', error.message);
+        scheduleReconnect();
+      });
+    }, reconnectDelayMs);
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, 5 * 60 * 1000);
+  }
+
+  async function connect() {
+    const config = await getImapConfig();
+    if (!config) {
+      console.log('Inbound email is not configured; monitoring stopped');
+      return;
+    }
+    imap = new Imap({ ...config, tlsOptions: { rejectUnauthorized }, keepalive: true });
+
+    imap.once('ready', () => {
+      reconnectDelayMs = 5000;
+      imap.openBox('INBOX', false, openError => {
+        if (openError) {
+          console.error('IMAP open inbox error:', openError.message);
+          imap.end();
+          return;
+        }
+        console.log('✓ Email monitoring connected to inbox');
+        processUnseen();
+      });
+    });
+    imap.on('mail', () => processUnseen());
+    imap.once('error', error => {
+      console.error('IMAP error:', error.message);
+      scheduleReconnect();
+    });
+    imap.once('end', () => {
+      console.log('IMAP connection ended');
+      scheduleReconnect();
+    });
+    imap.connect();
+  }
+
+  connect().catch(error => {
+    console.error('IMAP connection setup failed:', error.message);
+    scheduleReconnect();
+  });
+
+  // Fallback poll in case IDLE notifications are missed, every 'Email polling interval'
+  // minutes from Settings → Email (falls back to EMAIL_POLL_INTERVAL, default 5).
+  let minutesSincePoll = 0;
+  cron.schedule('* * * * *', async () => {
+    minutesSincePoll += 1;
+    const settings = await getSystemSettings().catch(() => null);
+    const interval = Math.min(Math.max(Number(settings?.imapPollInterval) || envPollMinutes, 1), 59);
+    if (minutesSincePoll >= interval) {
+      minutesSincePoll = 0;
+      processUnseen();
+    }
+  });
+  console.log('✓ Email polling fallback scheduled (interval from Settings → Email)');
+
+  return { processUnseen };
 }
 
 module.exports = {
@@ -506,5 +745,8 @@ module.exports = {
   getSystemSettings,
   getEmailTemplates,
   createEmailTransporter,
-  clearSettingsCache
+  clearSettingsCache,
+  getImapConfig,
+  htmlToText,
+  isAutomatedMessage
 };

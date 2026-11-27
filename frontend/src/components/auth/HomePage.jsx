@@ -8,7 +8,7 @@ export const HomePage = ({ onGetStarted }) => {
       <header className="bg-white border-b border-zinc-200 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-6 h-16 flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <Logo size="md" className="h-9 w-auto" />
+            <Logo size="md" className="h-12 w-auto" />
             <div>
               <h1 className="text-sm font-bold text-zinc-900 tracking-tight leading-none">
                 KUCCPS ICT Support

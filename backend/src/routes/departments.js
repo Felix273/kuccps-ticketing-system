@@ -1,17 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const departmentController = require('../controllers/departmentController');
-const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { authenticateToken, requirePermission } = require('../middleware/auth');
 
 // All routes require authentication
 router.use(authenticateToken);
 
 // Read-Only Directory: Available to all authenticated users
-router.get('/', departmentController.getAllDepartments);
-router.get('/:id', departmentController.getDepartmentById);
+router.get('/', requirePermission('users.view', 'tickets.view'), departmentController.getAllDepartments);
+router.get('/:id', requirePermission('users.view', 'tickets.view'), departmentController.getDepartmentById);
 
 // AD Sync: Allowed strictly for administrators
-router.post('/sync/ad', requireAdmin, departmentController.syncDirectoratesFromAd);
+router.post('/sync/ad', requirePermission('settings.directory'), departmentController.syncDirectoratesFromAd);
 
 // Local Mutations: Permanently disabled because AD is the authoritative source
 const disabledMutationHandler = (req, res) => {

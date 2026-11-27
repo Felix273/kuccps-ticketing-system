@@ -62,6 +62,7 @@ model User {
   ldapDn         String?
   ldapObjectGuid String?
   lastSyncedAt   DateTime?
+  tokensRevokedAt DateTime?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
@@ -122,6 +123,19 @@ model Ticket {
   slaResponseTargetPercent   Int?
   slaResolutionTargetPercent Int?
   slaBreached                Boolean   @default(false)
+  // On Hold pauses the SLA clock: deadlines are pushed back by the time spent on hold.
+  holdReason                 String?   @db.Text
+  onHoldSince                DateTime?
+  totalHoldMinutes           Int       @default(0)
+  // Escalation bookkeeping (each stage is sent once).
+  slaWarningSentAt           DateTime?
+  slaEscalatedAt             DateTime?
+  // Officer resolution record.
+  resolutionNotes            String?   @db.Text
+  resolutionEffectiveness    Int?
+  resolutionReusable         Boolean?
+  resolutionRecommendations  String?   @db.Text
+  knowledgeArticleId         String?
 
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
@@ -182,7 +196,9 @@ model TicketHistory {
   field     String
   oldValue  String?
   newValue  String?
-  changedBy String?
+  changedBy     String?
+  changedByName String?
+  note          String?  @db.Text
 
   createdAt DateTime @default(now())
 
@@ -252,7 +268,7 @@ model SystemSettings {
   ticketNumberFormat String @default("YYYYMMDD-XXXX")
 
   defaultPriority String @default("Medium")
-  defaultCategory String @default("General Issues")
+  defaultCategory String @default("Incident/Problem Resolution")
   defaultStatus   String @default("Open")
 
   googleAddonApiUrl  String?
@@ -265,6 +281,15 @@ model SystemSettings {
   maintenanceMessage String?
   darkModeEnabled    Boolean @default(false)
   contrastMode       String  @default("normal")
+
+  // Lifecycle and escalation
+  reopenWindowDays   Int     @default(14)
+  slaWarningPercent  Int     @default(75)
+  escalationEmails   String?
+
+  // Test mode: redirect every outgoing email to a test mailbox
+  emailTestMode      Boolean @default(false)
+  emailTestAddress   String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -461,6 +486,7 @@ model NotificationPreference {
   userId              String   @unique
   user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   emailOnAssignment   Boolean  @default(true)
+  emailOnNewTicket    Boolean  @default(true)
   emailOnStatusChange Boolean  @default(true)
   emailOnNewComment   Boolean  @default(true)
   dailyDigest         Boolean  @default(false)
@@ -673,4 +699,22 @@ model KnowledgeFeedback {
   createdAt  DateTime         @default(now())
 
   @@index([articleId])
+}
+
+// Inbound IMAP messages already turned into tickets/comments (prevents re-processing).
+model ProcessedEmail {
+  messageId String   @id
+  ticketId  String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// Shared rate-limit counters so limits hold across multiple backend instances.
+model RateLimitBucket {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+
+  @@index([resetAt])
 }

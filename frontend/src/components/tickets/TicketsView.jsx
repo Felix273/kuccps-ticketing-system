@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { toast } from 'react-hot-toast';
 import { 
   Search, 
   Filter, 
@@ -22,15 +23,24 @@ import { AdvancedSearchModal } from './AdvancedSearchModal';
 import { ticketService } from '../../services/ticketService';
 import { useDepartments } from '../../hooks/useDepartments';
 import { useUsers } from '../../hooks/useUsers';
+import { useTicketPage } from '../../hooks/useTicketPage';
 import { exportToCSV, exportToExcel } from '../../utils/exportUtils';
 import { authService } from '../../services/authService';
 import { PRIORITY_LEVELS, TICKET_STATUS, normalizePriority } from '../../utils/constants';
+import { can } from '../../utils/permissions';
+
+// Debounce text input so typing in the search box does not send a request per keystroke.
+function useDebouncedValue(value, delayMs = 300) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 export const TicketsView = ({
-  tickets = [],
-  isLoading,
-  error,
-  onRefresh,
+  refreshKey = 0,
   dashboardFilter,
   onClearDashboardFilter
 }) => {
@@ -38,106 +48,86 @@ export const TicketsView = ({
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterPriority, setFilterPriority] = useState('all');
   const [filterDepartment, setFilterDepartment] = useState('all');
-  const [filterAssignedTo, setFilterAssignedTo] = useState('all');
   const [activeSegment, setActiveSegment] = useState('all'); // 'all', 'unassigned', 'my-tickets', 'critical', 'in-progress', 'resolved'
   const [viewingTicket, setViewingTicket] = useState(null);
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
   const [advancedFilters, setAdvancedFilters] = useState(null);
   const [viewMode, setViewMode] = useState('table');
+  const [isExporting, setIsExporting] = useState(false);
 
-  // Pagination
+  // Pagination (server-side)
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(15);
 
   const { departments = [] } = useDepartments(true);
   const { users = [] } = useUsers();
   const currentUser = authService.getCurrentUser();
+  const debouncedSearch = useDebouncedValue(searchQuery.trim());
 
-  // Reset page when criteria changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, filterStatus, filterPriority, filterDepartment, filterAssignedTo, activeSegment, advancedFilters, dashboardFilter]);
-
-  // Segment Tab Counts
-  const segmentCounts = useMemo(() => {
+  // Filters shared by the list request and the export (everything except page/segment).
+  const filterParams = useMemo(() => {
+    const advanced = advancedFilters || {};
+    const departmentIds = (advanced.department || [])
+      .map(name => departments.find(dept => dept.name === name)?.id)
+      .filter(Boolean);
     return {
-      all: tickets.length,
-      unassigned: tickets.filter(t => !t.assignedToId).length,
-      myTickets: tickets.filter(t => currentUser?.id && t.assignedToId === currentUser.id).length,
-      critical: tickets.filter(t => normalizePriority(t.priority) === 'VeryHigh' && t.status !== 'Resolved' && t.status !== 'Closed').length,
-      inProgress: tickets.filter(t => t.status === 'InProgress').length,
-      onHold: tickets.filter(t => t.status === 'OnHold').length,
-      resolved: tickets.filter(t => t.status === 'Resolved').length,
-      closed: tickets.filter(t => t.status === 'Closed').length
+      ...(dashboardFilter?.params || {}),
+      q: debouncedSearch,
+      ticketNumber: advanced.ticketNumber,
+      subject: advanced.subject,
+      requesterEmail: advanced.requesterEmail,
+      dateFrom: advanced.dateFrom,
+      dateTo: advanced.dateTo,
+      status: filterStatus !== 'all' ? [filterStatus] : (advanced.status?.length ? advanced.status : dashboardFilter?.params?.status),
+      priority: filterPriority !== 'all' ? [filterPriority] : advanced.priority,
+      departmentId: filterDepartment !== 'all' ? [filterDepartment] : departmentIds,
+      assignedToId: advanced.assignedTo
     };
-  }, [tickets, currentUser?.id]);
+  }, [advancedFilters, dashboardFilter, debouncedSearch, departments, filterDepartment, filterPriority, filterStatus]);
 
-  const filteredTickets = useMemo(() => {
-    let result = [...tickets];
-    if (dashboardFilter) {
-      const selectedTicketIds = new Set(dashboardFilter.ticketIds);
-      result = result.filter(ticket => selectedTicketIds.has(ticket.id));
-    }
+  // Reset to page 1 when the filter criteria change (adjusting state during render
+  // avoids the extra render pass an effect would cause).
+  const filterKey = JSON.stringify([filterParams, activeSegment]);
+  const [pagedFilterKey, setPagedFilterKey] = useState(filterKey);
+  if (pagedFilterKey !== filterKey) {
+    setPagedFilterKey(filterKey);
+    setCurrentPage(1);
+  }
 
-    // Segment Filter
-    if (activeSegment === 'unassigned') {
-      result = result.filter(t => !t.assignedToId);
-    } else if (activeSegment === 'my-tickets') {
-      if (currentUser?.id) result = result.filter(t => t.assignedToId === currentUser.id);
-    } else if (activeSegment === 'critical') {
-      result = result.filter(t => normalizePriority(t.priority) === 'VeryHigh' && t.status !== 'Resolved' && t.status !== 'Closed');
-    } else if (activeSegment === 'in-progress') {
-      result = result.filter(t => t.status === 'InProgress');
-    } else if (activeSegment === 'on-hold') {
-      result = result.filter(t => t.status === 'OnHold');
-    } else if (activeSegment === 'resolved') {
-      result = result.filter(t => t.status === 'Resolved');
-    } else if (activeSegment === 'closed') {
-      result = result.filter(t => t.status === 'Closed');
-    }
+  const {
+    tickets: paginatedTickets,
+    pagination,
+    segmentCounts: serverCounts,
+    isLoading,
+    hasLoaded,
+    error,
+    reload
+  } = useTicketPage(
+    { ...filterParams, segment: activeSegment, page: currentPage, pageSize: itemsPerPage },
+    { refreshKey }
+  );
 
-    if (advancedFilters) {
-      if (advancedFilters.ticketNumber) {
-        result = result.filter(t => t.ticketNumber?.toLowerCase().includes(advancedFilters.ticketNumber.toLowerCase()));
-      }
-      if (advancedFilters.subject) {
-        result = result.filter(t => t.subject?.toLowerCase().includes(advancedFilters.subject.toLowerCase()));
-      }
-      if (advancedFilters.requesterEmail) {
-        result = result.filter(t => t.requesterEmail?.toLowerCase().includes(advancedFilters.requesterEmail.toLowerCase()));
-      }
-      if (advancedFilters.status?.length > 0) {
-        result = result.filter(t => advancedFilters.status.includes(t.status));
-      }
-      if (advancedFilters.priority?.length > 0) {
-        result = result.filter(t => advancedFilters.priority.includes(normalizePriority(t.priority)));
-      }
-    }
+  const segmentCounts = {
+    all: serverCounts.all ?? 0,
+    unassigned: serverCounts.unassigned ?? 0,
+    myTickets: serverCounts['my-tickets'] ?? 0,
+    critical: serverCounts.critical ?? 0,
+    inProgress: serverCounts['in-progress'] ?? 0,
+    onHold: serverCounts['on-hold'] ?? 0,
+    resolved: serverCounts.resolved ?? 0,
+    closed: serverCounts.closed ?? 0
+  };
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(t => 
-        t.ticketNumber?.toLowerCase().includes(q) ||
-        t.subject?.toLowerCase().includes(q) ||
-        t.requesterEmail?.toLowerCase().includes(q)
-      );
-    }
-
-    if (filterStatus !== 'all') result = result.filter(t => t.status === filterStatus);
-    if (filterPriority !== 'all') result = result.filter(t => normalizePriority(t.priority) === filterPriority);
-    if (filterDepartment !== 'all') result = result.filter(t => t.department?.name === filterDepartment);
-    if (filterAssignedTo !== 'all') {
-      if (filterAssignedTo === 'unassigned') result = result.filter(t => !t.assignedToId);
-      else result = result.filter(t => t.assignedToId === filterAssignedTo);
-    }
-
-    return result;
-  }, [tickets, dashboardFilter, activeSegment, advancedFilters, searchQuery, filterStatus, filterPriority, filterDepartment, filterAssignedTo, currentUser?.id]);
-
-  const totalItems = filteredTickets.length;
-  const totalPages = Math.ceil(totalItems / itemsPerPage);
+  const totalItems = pagination.total;
+  const totalPages = pagination.totalPages;
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedTickets = filteredTickets.slice(startIndex, startIndex + itemsPerPage);
+
+  // A page can disappear (e.g. tickets resolved elsewhere); step back to the last page.
+  if (hasLoaded && !isLoading && currentPage > 1 && currentPage > totalPages) {
+    setCurrentPage(totalPages);
+  }
+
+  const refreshList = () => reload();
 
   const handleClaimTicket = async (ticket, e) => {
     if (e) e.stopPropagation();
@@ -145,17 +135,30 @@ export const TicketsView = ({
     if (!confirm(`Claim ticket ${ticket.ticketNumber}?`)) return;
     try {
       const result = await ticketService.assign(ticket.id, currentUser.id);
-      if (result.success && onRefresh) await onRefresh();
+      if (result.success) refreshList();
     } catch (err) {
       console.error('Claim error:', err);
+      toast.error(err.message || 'Failed to claim ticket');
     }
   };
 
-  const handleExport = (format) => {
-    if (filteredTickets.length === 0) return;
-    const filename = `tickets_${new Date().toISOString().split('T')[0]}`;
-    if (format === 'csv') exportToCSV(filteredTickets, `${filename}.csv`);
-    else exportToExcel(filteredTickets, `${filename}.xlsx`);
+  const handleExport = async (format) => {
+    if (totalItems === 0 || isExporting) return;
+    setIsExporting(true);
+    try {
+      const result = await ticketService.exportTickets({ ...filterParams, segment: activeSegment });
+      if (!result.success) throw new Error(result.message || 'Export failed');
+      if (result.truncated) {
+        toast(`Export limited to the first ${result.limit.toLocaleString()} of ${result.total.toLocaleString()} tickets. Narrow the filters to export the rest.`);
+      }
+      const filename = `tickets_${new Date().toISOString().split('T')[0]}`;
+      if (format === 'csv') exportToCSV(result.tickets, `${filename}.csv`);
+      else exportToExcel(result.tickets, `${filename}.xlsx`);
+    } catch (err) {
+      toast.error(err.message || 'Export failed');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   // Linear / getdesign.md Precision Status Indicator
@@ -242,7 +245,7 @@ export const TicketsView = ({
     }
   };
 
-  if (isLoading) {
+  if (isLoading && !hasLoaded) {
     return (
       <div className="flex items-center justify-center h-80">
         <div className="flex items-center gap-2 font-mono text-xs text-zinc-500">
@@ -255,6 +258,23 @@ export const TicketsView = ({
 
   return (
     <div className="space-y-4">
+      {error && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-800">
+          <span className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            Tickets could not be loaded: {String(error)}
+          </span>
+          {(
+            <button
+              type="button"
+              onClick={refreshList}
+              className="text-xs font-semibold text-rose-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-600"
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )}
       {dashboardFilter && (
         <div className="flex flex-wrap items-center justify-between gap-2 border border-[#990024]/20 bg-white px-4 py-2.5 text-sm">
           <p className="text-zinc-700">
@@ -282,7 +302,6 @@ export const TicketsView = ({
             { id: 'in-progress', label: 'In Progress', count: segmentCounts.inProgress },
             { id: 'on-hold', label: 'On Hold', count: segmentCounts.onHold },
             { id: 'critical', label: 'Very High', count: segmentCounts.critical, alert: segmentCounts.critical > 0 },
-            { id: 'resolved', label: 'Resolved', count: segmentCounts.resolved },
             { id: 'closed', label: 'Closed', count: segmentCounts.closed }
           ].map(tab => {
             const isActive = activeSegment === tab.id;
@@ -363,7 +382,7 @@ export const TicketsView = ({
             >
               <option value="all">Dept: All</option>
               {departments.map(d => (
-                <option key={d.id} value={d.name}>{d.name}</option>
+                <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </select>
 
@@ -410,23 +429,24 @@ export const TicketsView = ({
               <span>Filters</span>
             </button>
 
-            <button
-              onClick={() => handleExport('csv')}
-              className="px-2.5 py-1 text-xs font-mono border border-zinc-200 rounded hover:bg-zinc-50 text-zinc-600 flex items-center gap-1"
-            >
-              <Download className="w-3 h-3 text-zinc-400" />
-              <span>Export</span>
-            </button>
-
-            {onRefresh && (
+            {can(currentUser, 'tickets.export') && (
               <button
-                onClick={onRefresh}
-                className="p-1 border border-zinc-200 rounded hover:bg-zinc-50 text-zinc-500"
-                title="Refresh stream"
+                onClick={() => handleExport('csv')}
+                disabled={isExporting}
+                className="px-2.5 py-1 text-xs font-mono border border-zinc-200 rounded hover:bg-zinc-50 text-zinc-600 flex items-center gap-1"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
+                <Download className="w-3 h-3 text-zinc-400" />
+                <span>{isExporting ? 'Exporting...' : 'Export'}</span>
               </button>
             )}
+
+            <button
+              onClick={refreshList}
+              className="p-1 border border-zinc-200 rounded hover:bg-zinc-50 text-zinc-500"
+              title="Refresh stream"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-[#990024]' : ''}`} />
+            </button>
           </div>
 
         </div>
@@ -493,12 +513,16 @@ export const TicketsView = ({
                         {/* Refined Assignee Cell */}
                         <td className="py-3 px-4 whitespace-nowrap">
                           {isUnclaimed ? (
-                            <button
-                              onClick={(e) => handleClaimTicket(ticket, e)}
-                              className="px-2 py-0.5 text-[10px] font-mono font-semibold text-zinc-600 hover:text-[#990024] hover:border-[#990024] bg-white border border-zinc-200 rounded transition-colors"
-                            >
-                              + Claim
-                            </button>
+                            can(currentUser, 'tickets.work') ? (
+                              <button
+                                onClick={(e) => handleClaimTicket(ticket, e)}
+                                className="px-2 py-0.5 text-[10px] font-mono font-semibold text-zinc-600 hover:text-[#990024] hover:border-[#990024] bg-white border border-zinc-200 rounded transition-colors"
+                              >
+                                + Claim
+                              </button>
+                            ) : (
+                              <span className="font-mono text-[11px] text-zinc-400">Unclaimed</span>
+                            )
                           ) : (
                             <div className="flex items-center gap-1.5">
                               <span className="w-5 h-5 rounded-full bg-zinc-100 text-zinc-700 text-[9px] font-mono font-bold flex items-center justify-center border border-zinc-200 shrink-0">
@@ -528,7 +552,7 @@ export const TicketsView = ({
                   key={t.id} 
                   ticket={t} 
                   currentUser={currentUser} 
-                  onClaim={() => handleClaimTicket(t)} 
+                  onClaim={can(currentUser, 'tickets.work') ? () => handleClaimTicket(t) : undefined}
                   onViewDetails={() => setViewingTicket(t)} 
                 />
               ))}
@@ -594,7 +618,7 @@ export const TicketsView = ({
         <TicketDetailModal
           ticket={viewingTicket}
           onClose={() => setViewingTicket(null)}
-          onUpdate={onRefresh}
+          onUpdate={refreshList}
           currentUser={currentUser}
           users={users}
         />

@@ -6,6 +6,7 @@ const { sendEmailNotification } = require('../services/notificationService');
 const prisma = require('../lib/prisma');
 
 const DEFAULT_PREFERENCES = {
+  emailOnNewTicket: true,
   emailOnAssignment: true,
   emailOnStatusChange: true,
   emailOnNewComment: true,
@@ -14,6 +15,7 @@ const DEFAULT_PREFERENCES = {
 };
 
 const selectPreferenceFields = {
+  emailOnNewTicket: true,
   emailOnAssignment: true,
   emailOnStatusChange: true,
   emailOnNewComment: true,
@@ -120,7 +122,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.get('/preferences', authenticateToken, requirePermission('settings.notifications.view'), async (req, res) => {
+router.get('/preferences', authenticateToken, async (req, res) => {
   try {
     const preferences = await getOrCreatePreferences(req.user.id);
     res.json({
@@ -137,7 +139,7 @@ router.get('/preferences', authenticateToken, requirePermission('settings.notifi
   }
 });
 
-router.put('/preferences', authenticateToken, requirePermission('settings.notifications.update'), async (req, res) => {
+router.put('/preferences', authenticateToken, async (req, res) => {
   try {
     const data = {};
     Object.keys(DEFAULT_PREFERENCES).forEach(key => {
@@ -169,7 +171,7 @@ router.put('/preferences', authenticateToken, requirePermission('settings.notifi
   }
 });
 
-router.post('/test', authenticateToken, requirePermission('settings.notifications.test'), async (req, res) => {
+router.post('/test', authenticateToken, async (req, res) => {
   try {
     const to = req.user.email;
     if (!to) {

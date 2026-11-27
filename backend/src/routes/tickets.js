@@ -2,9 +2,9 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const ticketController = require('../controllers/ticketController');
-const { authenticateToken, requireStaffOrAdmin } = require('../middleware/auth');
-const { requirePublicApiKey } = require('../middleware/security');
+const { authenticateToken, requirePermission } = require('../middleware/auth');
 const { uploadDir } = require('../services/uploadStorage');
+const prisma = require('../lib/prisma');
 
 const allowedTypes = new Set([
   'image/jpeg',
@@ -18,23 +18,35 @@ const allowedTypes = new Set([
   'application/msword',
   'application/vnd.ms-excel'
 ]);
+const allowedExtensions = new Set(['jpg', 'jpeg', 'png', 'gif', 'pdf', 'txt', 'csv', 'doc', 'docx', 'xls', 'xlsx']);
+
 const upload = multer({
   dest: uploadDir,
   limits: { fileSize: parseInt(process.env.MAX_UPLOAD_BYTES, 10) || 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (!allowedTypes.has(file.mimetype)) {
+    const extension = String(file.originalname || '').split('.').pop().toLowerCase();
+    // Declared type and extension must both be on the built-in safe list; the
+    // administrator's "allowed file types" setting can narrow it further.
+    if (!allowedTypes.has(file.mimetype) || !allowedExtensions.has(extension)) {
       return cb(new Error('File type is not allowed'));
     }
-    cb(null, true);
+    prisma.systemSettingsAllowedFileType.findMany({ select: { extension: true } })
+      .then(configured => {
+        const adminAllowed = new Set(configured.map(item => item.extension.replace(/^\./, '').toLowerCase()));
+        if (adminAllowed.size && !adminAllowed.has(extension)) {
+          return cb(new Error('File type is not allowed'));
+        }
+        cb(null, true);
+      })
+      .catch(cb);
   }
 });
 
-// Public route - create ticket (for Google Addon)
-router.post('/public/tickets', requirePublicApiKey, ticketController.createTicket);
+// Public intake lives in routes/publicTickets.js (mounted before this router with rate limiting).
 
 // Protected routes - require authentication
 router.use(authenticateToken);
-router.use(requireStaffOrAdmin);
+const canView = requirePermission('tickets.view');
 
 router.post("/", (req, res) => {
   res.status(403).json({
@@ -42,14 +54,18 @@ router.post("/", (req, res) => {
     message: 'Tickets must be generated from requester email intake. Manual staff ticket creation is disabled.'
   });
 });
-router.get('/', ticketController.getAllTickets);
-router.get('/statistics', ticketController.getStatistics);
-router.get('/:id', ticketController.getTicketById);
-router.get('/:id/attachments/:attachmentId', ticketController.downloadAttachment);
-router.put('/:id', ticketController.updateTicket);
-router.post('/:id/escalate', ticketController.escalateTicket);
-router.post('/:id/comments', ticketController.addComment);
-router.post('/:id/attachments', upload.single('file'), ticketController.addAttachment);
+router.get('/', canView, ticketController.getAllTickets);
+router.get('/statistics', canView, ticketController.getStatistics);
+router.get('/overview', requirePermission('reports.view', 'tickets.view'), ticketController.getOverview);
+router.get('/workload', requirePermission('users.view', 'reports.view'), ticketController.getWorkload);
+router.get('/export', requirePermission('tickets.export'), ticketController.exportTickets);
+router.get('/:id', canView, ticketController.getTicketById);
+router.get('/:id/attachments/:attachmentId', canView, ticketController.downloadAttachment);
+// Fine-grained checks (assigning others, reopening) happen in the controller.
+router.put('/:id', requirePermission('tickets.work', 'tickets.assign', 'tickets.reopen'), ticketController.updateTicket);
+router.post('/:id/escalate', requirePermission('tickets.escalate'), ticketController.escalateTicket);
+router.post('/:id/comments', requirePermission('tickets.work'), ticketController.addComment);
+router.post('/:id/attachments', requirePermission('tickets.work'), upload.single('file'), ticketController.addAttachment);
 
 // Note: We don't have a delete function yet, so commenting this out
 // If you need to add delete functionality later, add it to the controller first

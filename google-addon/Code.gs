@@ -9,18 +9,25 @@ const DEFAULT_CONFIG = {
   BACKEND_API_KEY: ''
 };
 
+// Must match the ICT Service Charter categories used by the backend SLA timelines.
 const ISSUE_CATEGORIES = [
-  'Hardware Issues',
-  'Software Issues',
-  'Network & Connectivity Issues',
-  'Email & Communication Issues',
-  'Access & Permissions Issues',
-  'Printer & Peripheral Issues',
-  'Security Issues',
-  'General Issues'
+  'Equipment Issuance',
+  'Hardware Support',
+  'Software Support',
+  'Provision of Information',
+  'Incident/Problem Resolution',
+  'Software Development',
+  'Information Inquiry'
 ];
 
-const PRIORITY_LEVELS = ['Low', 'Medium', 'High', 'Critical'];
+// Urgency levels from the Service Charter SLA matrix (value, label).
+const PRIORITY_LEVELS = [
+  ['VeryHigh', 'Very High'],
+  ['High', 'High'],
+  ['Medium', 'Medium'],
+  ['Low', 'Low'],
+  ['VeryLow', 'Very Low']
+];
 
 function onHomepage() {
   return createMainCard();
@@ -43,8 +50,8 @@ function getConfig() {
   return {
     BASE_URL: baseUrl,
     PUBLIC_TICKET_URL: baseUrl + '/public/tickets',
-    MY_TICKETS_URL: baseUrl + '/tickets/public/my-tickets',
-    CSAT_URL: baseUrl + '/operations/csat/public',
+    MY_TICKETS_URL: baseUrl + '/public/tickets/my-tickets',
+    CSAT_URL: baseUrl + '/public/tickets/csat',
     SUPPORT_EMAIL: cleanProperty(properties.getProperty('SUPPORT_EMAIL')) || DEFAULT_CONFIG.SUPPORT_EMAIL,
     BACKEND_API_KEY: cleanProperty(properties.getProperty('BACKEND_API_KEY')) || DEFAULT_CONFIG.BACKEND_API_KEY
   };
@@ -104,7 +111,7 @@ function createTicketFormCard(userEmail, config) {
   const header = CardService.newCardHeader()
     .setTitle('KUCCPS IT Support')
     .setSubtitle('Submit a Support Ticket')
-    .setImageUrl('https://careers.kuccps.net/Images/KUCCPS-Logo.png')
+    .setImageUrl('https://www.kuccps.net/sites/default/files/logo.png')
     .setImageStyle(CardService.ImageStyle.SQUARE);
 
   card.setHeader(header);
@@ -124,7 +131,7 @@ function createTicketFormCard(userEmail, config) {
     .setFieldName('category');
 
   ISSUE_CATEGORIES.forEach(function(category) {
-    categoryDropdown.addItem(category, category, category === 'General Issues');
+    categoryDropdown.addItem(category, category, category === 'Incident/Problem Resolution');
   });
 
   section.addWidget(categoryDropdown);
@@ -135,7 +142,7 @@ function createTicketFormCard(userEmail, config) {
     .setFieldName('priority');
 
   PRIORITY_LEVELS.forEach(function(priority) {
-    priorityDropdown.addItem(priority, priority, priority === 'Medium');
+    priorityDropdown.addItem(priority[1], priority[0], priority[0] === 'Medium');
   });
 
   section.addWidget(priorityDropdown);
@@ -181,7 +188,7 @@ function createCsatRatingCard(ticket) {
   const header = CardService.newCardHeader()
     .setTitle('Service Satisfaction Survey')
     .setSubtitle('Ticket #' + ticket.ticketNumber + ' Resolved')
-    .setImageUrl('https://careers.kuccps.net/Images/KUCCPS-Logo.png')
+    .setImageUrl('https://www.kuccps.net/sites/default/files/logo.png')
     .setImageStyle(CardService.ImageStyle.SQUARE);
 
   card.setHeader(header);
@@ -263,7 +270,7 @@ function submitTicket(e) {
       subject: String(formInput.subject).trim(),
       description: String(formInput.description).trim(),
       requesterEmail: userEmail,
-      category: formInput.category || 'General Issues',
+      category: formInput.category || 'Incident/Problem Resolution',
       priority: formInput.priority || 'Medium'
     };
 
@@ -310,7 +317,7 @@ function submitCsatFeedback(e) {
       const header = CardService.newCardHeader()
         .setTitle('Thank You!')
         .setSubtitle('Feedback Submitted')
-        .setImageUrl('https://careers.kuccps.net/Images/KUCCPS-Logo.png');
+        .setImageUrl('https://www.kuccps.net/sites/default/files/logo.png');
       card.setHeader(header);
 
       const section = CardService.newCardSection();
@@ -401,7 +408,7 @@ function createSuccessCard(message) {
 
   const header = CardService.newCardHeader()
     .setTitle('Ticket Submitted Successfully')
-    .setImageUrl('https://careers.kuccps.net/Images/KUCCPS-Logo.png')
+    .setImageUrl('https://www.kuccps.net/sites/default/files/logo.png')
     .setImageStyle(CardService.ImageStyle.SQUARE);
 
   card.setHeader(header);
@@ -440,7 +447,7 @@ function createErrorCard(errorMessage) {
 
   const header = CardService.newCardHeader()
     .setTitle('Submission Failed')
-    .setImageUrl('https://careers.kuccps.net/Images/KUCCPS-Logo.png')
+    .setImageUrl('https://www.kuccps.net/sites/default/files/logo.png')
     .setImageStyle(CardService.ImageStyle.SQUARE);
 
   card.setHeader(header);

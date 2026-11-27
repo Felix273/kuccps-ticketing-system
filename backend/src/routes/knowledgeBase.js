@@ -3,8 +3,9 @@ const router = express.Router();
 const crypto = require('crypto');
 const multer = require('multer');
 const knowledgeBaseController = require('../controllers/knowledgeBaseController');
-const { authenticateToken, requireAdmin, requireStaffOrAdmin } = require('../middleware/auth');
+const { authenticateToken, requirePermission } = require('../middleware/auth');
 const { uploadDir } = require('../services/uploadStorage');
+const { rateLimit } = require('../middleware/security');
 
 // Strict file validation for officer uploads
 const upload = multer({
@@ -17,6 +18,7 @@ const upload = multer({
     const allowedTypes = new Set([
       'text/plain',
       'text/markdown',
+      'text/x-markdown',
       'text/csv',
       'application/json',
       'application/pdf',
@@ -27,7 +29,12 @@ const upload = multer({
       'image/webp'
     ]);
     const allowedExtensions = /\.(txt|md|csv|json|log|pdf|doc|docx|png|jpg|jpeg|webp)$/i;
-    if (!allowedTypes.has(file.mimetype) && !allowedExtensions.test(file.originalname)) {
+    // The extension must be allowed AND the declared type must match the allow-list
+    // (browsers report unknown plain-text types such as .md/.log as octet-stream).
+    const name = String(file.originalname || '');
+    const typeAllowed = allowedTypes.has(file.mimetype) ||
+      (file.mimetype === 'application/octet-stream' && /\.(md|log|txt|csv|json)$/i.test(name));
+    if (!allowedExtensions.test(name) || !typeAllowed) {
       return cb(new Error('Invalid file type. Allowed: PDF, DOCX, TXT, MD, CSV, JSON, PNG, JPG'));
     }
     cb(null, true);
@@ -35,23 +42,29 @@ const upload = multer({
 });
 
 // ── PUBLIC & GENERAL READ ROUTES ──────────────────────────────
-router.get('/public/articles', knowledgeBaseController.getArticles);
-router.get('/public/articles/:idOrSlug', knowledgeBaseController.getArticle);
-router.post('/articles/:id/feedback', knowledgeBaseController.submitFeedback);
+const publicReadLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, keyPrefix: 'kb-public-read' });
+const feedbackLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, keyPrefix: 'kb-feedback' });
+router.get('/public/articles', publicReadLimit, knowledgeBaseController.getArticles);
+router.get('/public/articles/:idOrSlug', publicReadLimit, knowledgeBaseController.getArticle);
+router.post('/articles/:id/feedback', feedbackLimit, knowledgeBaseController.submitFeedback);
 
 // ── PROTECTED OFFICER & ADMIN WORKBENCH ───────────────────────
 router.use(authenticateToken);
-router.use(requireStaffOrAdmin);
+const canRead = requirePermission('tickets.view', 'knowledge.contribute', 'knowledge.publish');
+const canContribute = requirePermission('knowledge.contribute', 'knowledge.publish');
+const canPublish = requirePermission('knowledge.publish');
+router.use(canRead);
 
 // Search & Read
 router.get('/articles', knowledgeBaseController.getArticles);
 router.get('/articles/:idOrSlug', knowledgeBaseController.getArticle);
 router.get('/articles/:id/revisions', knowledgeBaseController.getRevisions);
 router.get('/articles/:id/attachments/:storageKey', knowledgeBaseController.downloadArticleMaterial);
+router.get('/articles/:id/attachments/:storageKey/preview', knowledgeBaseController.previewArticleMaterial);
 
 // Officer Contributions
-router.post('/articles', knowledgeBaseController.createArticle);
-router.post('/materials/upload', upload.single('file'), knowledgeBaseController.uploadArticleMaterial);
+router.post('/articles', canContribute, knowledgeBaseController.createArticle);
+router.post('/materials/upload', canContribute, upload.single('file'), knowledgeBaseController.uploadArticleMaterial);
 
 // Insights & Ticket Contextual Deflection
 router.get('/insights', knowledgeBaseController.getKnowledgeInsights);
@@ -60,10 +73,10 @@ router.post('/articles/:id/rate', knowledgeBaseController.rateArticle);
 
 // ── STRICTLY ADMINISTRATOR ONLY (Requirement 3) ───────────────
 // Only admins can edit, approve, delete, or restore articles
-router.put('/articles/:id', requireAdmin, knowledgeBaseController.updateArticle);
-router.delete('/articles/:id', requireAdmin, knowledgeBaseController.deleteArticle);
-router.post('/articles/:id/restore', requireAdmin, knowledgeBaseController.restoreArticle);
-router.post('/articles/:id/approve', requireAdmin, knowledgeBaseController.approveArticle);
-router.get('/analytics/search-gaps', requireAdmin, knowledgeBaseController.getSearchGaps);
+router.put('/articles/:id', canPublish, knowledgeBaseController.updateArticle);
+router.delete('/articles/:id', canPublish, knowledgeBaseController.deleteArticle);
+router.post('/articles/:id/restore', canPublish, knowledgeBaseController.restoreArticle);
+router.post('/articles/:id/approve', canPublish, knowledgeBaseController.approveArticle);
+router.get('/analytics/search-gaps', canPublish, knowledgeBaseController.getSearchGaps);
 
 module.exports = router;

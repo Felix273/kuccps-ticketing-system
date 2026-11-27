@@ -109,13 +109,13 @@ const EmailTemplates = ({ permissions = new Set() }) => {
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
         <h3 className="text-lg font-medium">Email Templates</h3>
         <div className="flex space-x-3">
-          {permissions.has('settings.templates.reset') && <button
+          {permissions.has('settings.email') && <button
             onClick={handleResetToDefault}
             className="px-4 py-2 bg-white text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
           >
             Reset to Default
           </button>}
-          {!editingTemplate && permissions.has('settings.templates.create') && (
+          {!editingTemplate && permissions.has('settings.email') && (
             <button
               onClick={() => {
                 setEditingTemplate('new');
@@ -141,7 +141,7 @@ const EmailTemplates = ({ permissions = new Set() }) => {
               <select
                 value={templateForm.type}
                 onChange={(e) => setTemplateForm(prev => ({...prev, type: e.target.value}))}
-                disabled={editingTemplate !== 'new' || !permissions.has('settings.templates.create')}
+                disabled={editingTemplate !== 'new' || !permissions.has('settings.email')}
                 className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
               >
                 <option value="">Select Template Type</option>
@@ -158,8 +158,8 @@ const EmailTemplates = ({ permissions = new Set() }) => {
                 value={templateForm.subject}
                 onChange={(e) => setTemplateForm(prev => ({...prev, subject: e.target.value}))}
                 disabled={editingTemplate === 'new'
-                  ? !permissions.has('settings.templates.create')
-                  : !permissions.has('settings.templates.update')}
+                  ? !permissions.has('settings.email')
+                  : !permissions.has('settings.email')}
                 placeholder="[Ticket #{{ticketNumber}}] Your support request has been received"
                 className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
               />
@@ -174,8 +174,8 @@ const EmailTemplates = ({ permissions = new Set() }) => {
                 value={templateForm.html}
                 onChange={(e) => setTemplateForm(prev => ({...prev, html: e.target.value}))}
                 disabled={editingTemplate === 'new'
-                  ? !permissions.has('settings.templates.create')
-                  : !permissions.has('settings.templates.update')}
+                  ? !permissions.has('settings.email')
+                  : !permissions.has('settings.email')}
                 rows="15"
                 className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
                 placeholder="Enter HTML email template here..."
@@ -191,8 +191,8 @@ const EmailTemplates = ({ permissions = new Set() }) => {
                 Cancel
               </button>
               {(editingTemplate === 'new'
-                ? permissions.has('settings.templates.create')
-                : permissions.has('settings.templates.update')) && <button
+                ? permissions.has('settings.email')
+                : permissions.has('settings.email')) && <button
                 type="submit"
                 className="px-5 py-2.5 bg-[#990024] text-white rounded-lg hover:bg-[#80001e] transition-colors"
               >
@@ -215,13 +215,13 @@ const EmailTemplates = ({ permissions = new Set() }) => {
                     <p className="text-sm text-gray-500">ID: {template.id}</p>
                   </div>
                   <div className="flex space-x-2">
-                    {permissions.has('settings.templates.update') && <button
+                    {permissions.has('settings.email') && <button
                       onClick={() => handleEditTemplate(template)}
                       className="px-3 py-1.5 bg-slate-100 text-slate-700 text-sm rounded-lg hover:bg-slate-200 transition-colors"
                     >
                       Edit
                     </button>}
-                    {permissions.has('settings.templates.delete') && <button
+                    {permissions.has('settings.email') && <button
                       onClick={() => handleDeleteTemplate(template.type)}
                       className="px-3 py-1.5 bg-rose-50 text-rose-700 text-sm rounded-lg hover:bg-rose-100 transition-colors"
                     >

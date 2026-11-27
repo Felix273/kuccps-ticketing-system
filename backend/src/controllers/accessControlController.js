@@ -6,11 +6,17 @@ const {
   isValidRolePermissionSet,
   normalizeRolePermissionKeys,
   canReplaceUserRoles,
-  canRemoveLastAdmin
+  canRemoveLastAdmin,
+  legacyRoleFor,
+  PERMISSION_GROUPS,
+  ROLE_LABELS,
+  SYSTEM_ROLE_NAMES
 } = require('../services/accessControlService');
 
 const prisma = require('../lib/prisma');
-const RESERVED_ADMIN_PERMISSION = 'access-control.manage';
+const RESERVED_ADMIN_PERMISSION = 'access.manage';
+const roleLabel = role => ROLE_LABELS[role.name] || role.name.replace(/[-_]/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+const roleOrder = role => { const index = SYSTEM_ROLE_NAMES.indexOf(role.name); return index < 0 ? 100 : index; };
 
 function getActor(req) {
   return { id: req.user.id, email: req.user.email || '' };
@@ -25,7 +31,13 @@ exports.getMyAccess = async (req, res) => {
         select: { id: true }
       })
     ]);
-    res.json({ success: true, permissions, isAdmin: Boolean(adminRole) });
+    const roles = await prisma.userRole.findMany({ where: { userId: req.user.id }, select: { role: { select: { name: true } } } });
+    res.json({
+      success: true,
+      permissions,
+      isAdmin: Boolean(adminRole),
+      roles: roles.map(item => ({ name: item.role.name, label: roleLabel(item.role) }))
+    });
   } catch (error) {
     console.error('Get current access error:', error);
     res.status(500).json({ success: false, message: 'Failed to load access permissions' });
@@ -43,15 +55,18 @@ exports.getRoles = async (req, res) => {
     });
     res.json({
       success: true,
-      roles: roles.map(role => ({
+      roles: roles.sort((left, right) => roleOrder(left) - roleOrder(right) || left.name.localeCompare(right.name)).map(role => ({
         id: role.id,
         name: role.name,
+        label: roleLabel(role),
+        locked: role.name === 'admin' || role.name === 'user',
         description: role.description,
         isSystem: role.isSystem,
         userCount: role._count.users,
         permissions: role.permissions.map(item => item.permission.key)
       })),
-      permissions: PERMISSIONS
+      permissions: PERMISSIONS,
+      groups: PERMISSION_GROUPS.map(group => ({ group: group.group, keys: group.permissions.map(([key]) => key) }))
     });
   } catch (error) {
     console.error('Get access roles error:', error);
@@ -112,7 +127,10 @@ exports.updateRole = async (req, res) => {
     const role = await prisma.accessRole.findUnique({ where: { id: req.params.id } });
     if (!role) return res.status(404).json({ success: false, message: 'Role not found' });
     if (role.name === 'admin') {
-      return res.status(403).json({ success: false, message: 'The protected administrator role cannot be edited' });
+      return res.status(403).json({ success: false, message: 'The Administrator role always has every permission and cannot be edited' });
+    }
+    if (role.name === 'user') {
+      return res.status(403).json({ success: false, message: 'The Requester role cannot be given system permissions' });
     }
     const assignedToActor = await prisma.userRole.findFirst({
       where: { userId: req.user.id, roleId: role.id },
@@ -212,7 +230,7 @@ exports.getUsers = async (req, res) => {
       success: true,
       users: users.map(user => ({
         ...user,
-        roles: user.roleAssignments.map(assignment => assignment.role),
+        roles: user.roleAssignments.map(assignment => ({ ...assignment.role, label: roleLabel(assignment.role) })),
         roleAssignments: undefined
       }))
     });
@@ -264,13 +282,7 @@ exports.replaceUserRoles = async (req, res) => {
         throw Object.assign(new Error('The last administrator cannot be removed'), { status: 409 });
       }
 
-      const legacyRole = assigningAdmin
-        ? 'admin'
-        : roles.some(role => role.name === 'staff')
-          ? 'staff'
-          : roles.some(role => role.name === 'user')
-            ? 'user'
-            : target.role === 'admin' ? 'staff' : 'user';
+      const legacyRole = legacyRoleFor(roles.map(role => role.name));
 
       const previousRoles = (await tx.userRole.findMany({
         where: { userId },

@@ -294,7 +294,7 @@ const SlaTimelineSettings = () => {
             <h3 className="text-lg font-semibold text-zinc-900">SLA timelines</h3>
           </div>
           <p className="mt-2 max-w-3xl text-sm text-zinc-600">
-            Numeric targets use Monday–Friday, 08:00–17:00 Africa/Nairobi time; weekends and Kenya public holidays are excluded. A working day is nine working hours. Changes apply to new tickets only; existing deadline snapshots are preserved.
+            Calendar units run around the clock. Working units use Monday–Friday, 08:00–17:00 Africa/Nairobi time, excluding weekends and Kenya public holidays; a working day is nine working hours. Changes apply to new tickets only; existing deadline snapshots are preserved.
           </p>
           <p className="mt-1 max-w-3xl text-xs text-zinc-500">
             “Immediately” has no numeric response limit. Software Development stays specification-defined until an admin supplies a numeric timeline.

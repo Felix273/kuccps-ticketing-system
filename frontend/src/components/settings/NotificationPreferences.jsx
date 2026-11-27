@@ -6,6 +6,7 @@ import { accessControlService } from '../../services/accessControlService';
 export const NotificationPreferences = () => {
   const [permissions, setPermissions] = useState(null);
   const [preferences, setPreferences] = useState({
+    emailOnNewTicket: true,
     emailOnAssignment: true,
     emailOnStatusChange: true,
     emailOnNewComment: true,
@@ -30,9 +31,10 @@ export const NotificationPreferences = () => {
     return () => { active = false; };
   }, []);
 
-  const canView = permissions?.includes('settings.notifications.view') || false;
-  const canEdit = permissions?.includes('settings.notifications.update') || false;
-  const canTest = permissions?.includes('settings.notifications.test') || false;
+  // Personal alert settings belong to every signed-in user (no special permission).
+  const canView = Boolean(permissions);
+  const canEdit = canView;
+  const canTest = canView;
 
   useEffect(() => {
     if (canView) fetchPreferences();
@@ -101,40 +103,48 @@ export const NotificationPreferences = () => {
     }
   };
 
+  // All alerts always appear in the bell; these switches control the matching emails.
   const notificationOptions = [
+    {
+      key: 'emailOnNewTicket',
+      icon: <Mail className="w-5 h-5" />,
+      title: 'New Tickets',
+      description: 'Email me when a new ticket arrives in the queue',
+      color: 'text-[#990024]'
+    },
     {
       key: 'emailOnAssignment',
       icon: <Mail className="w-5 h-5" />,
       title: 'Ticket Assignments',
-      description: 'Get an email when a ticket is assigned to you',
+      description: 'Email me when a ticket is assigned to me',
       color: 'text-[#990024]'
     },
     {
       key: 'emailOnStatusChange',
       icon: <Bell className="w-5 h-5" />,
       title: 'Status Changes',
-      description: 'Get notified when ticket status changes',
+      description: 'Email me when the status of my tickets changes',
       color: 'text-[#990024]'
     },
     {
       key: 'emailOnNewComment',
       icon: <MessageSquare className="w-5 h-5" />,
-      title: 'New Comments',
-      description: 'Get notified when someone comments on your tickets',
+      title: 'Replies & Comments',
+      description: 'Email me when a requester replies or someone comments on my tickets',
+      color: 'text-[#990024]'
+    },
+    {
+      key: 'escalationAlerts',
+      icon: <AlertTriangle className="w-5 h-5" />,
+      title: 'Escalations & SLA Alerts',
+      description: 'Email me about escalations, tickets nearing or past their SLA, and low customer ratings',
       color: 'text-[#990024]'
     },
     {
       key: 'dailyDigest',
       icon: <Calendar className="w-5 h-5" />,
       title: 'Daily Digest',
-      description: 'Receive a daily summary of your active tickets at 8:00 AM',
-      color: 'text-[#990024]'
-    },
-    {
-      key: 'escalationAlerts',
-      icon: <AlertTriangle className="w-5 h-5" />,
-      title: 'Escalation Alerts',
-      description: 'Get alerts every two hours for high-priority tickets over two days past SLA',
+      description: 'A summary of my open and overdue tickets every weekday at 7:30 AM',
       color: 'text-[#990024]'
     }
   ];

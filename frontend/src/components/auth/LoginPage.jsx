@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertCircle, User, Lock, Eye, EyeOff, LogIn, ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertCircle, User, Lock, Eye, EyeOff, LogIn } from 'lucide-react';
 
 export const LoginPage = ({ onLogin, onBack }) => {
   const [username, setUsername] = useState('');
@@ -7,7 +7,6 @@ export const LoginPage = ({ onLogin, onBack }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showDemoCreds, setShowDemoCreds] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -25,11 +24,6 @@ export const LoginPage = ({ onLogin, onBack }) => {
       setError('Unable to connect to server. Please try again.');
       setIsLoading(false);
     }
-  };
-
-  const fillCredentials = (u, p) => {
-    setUsername(u);
-    setPassword(p);
   };
 
   return (
@@ -63,27 +57,21 @@ export const LoginPage = ({ onLogin, onBack }) => {
         
         {/* Header Dual Logo Banner */}
         <div className="flex items-center justify-center gap-4 sm:gap-6 pb-3 border-b border-gray-100">
-          <div className="flex flex-col items-center">
-            <img 
-              src="/kenya-coat-of-arms.png" 
-              alt="Republic of Kenya" 
-              className="h-14 sm:h-16 w-auto object-contain"
-              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-            />
-            <span className="text-[9px] font-extrabold tracking-wider text-gray-800 uppercase mt-1">
-              Republic of Kenya
-            </span>
-          </div>
+          {/* Official artwork from kuccps.net; the coat of arms already carries "Republic of Kenya". */}
+          <img
+            src="/kenya-coat-of-arms.png"
+            alt="Republic of Kenya"
+            className="h-[4.5rem] sm:h-20 w-auto object-contain"
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
 
-          <div className="h-12 w-[1px] bg-gray-300"></div>
+          <div className="h-16 w-[1px] bg-gray-300"></div>
 
-          <div className="flex items-center">
-            <img 
-              src="/kuccps-logo.png" 
-              alt="KUCCPS Logo" 
-              className="h-12 sm:h-14 w-auto object-contain"
-            />
-          </div>
+          <img
+            src="/kuccps-logo.png"
+            alt="Kenya Universities and Colleges Central Placement Service"
+            className="h-16 sm:h-[4.5rem] w-auto object-contain"
+          />
         </div>
 
         {/* Portal Title & Subtitle */}
@@ -188,37 +176,6 @@ export const LoginPage = ({ onLogin, onBack }) => {
           </p>
         </div>
 
-        {import.meta.env.DEV && (
-          <div className="mt-4 pt-3 border-t border-dashed border-gray-200">
-            <button
-              type="button"
-              onClick={() => setShowDemoCreds(!showDemoCreds)}
-              className="w-full flex items-center justify-between text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <span>Developer Test Accounts</span>
-              {showDemoCreds ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-
-            {showDemoCreds && (
-              <div className="mt-2.5 p-2.5 bg-gray-50 rounded-lg text-[11px] space-y-1.5 text-gray-600">
-                <div
-                  onClick={() => fillCredentials('admin', 'admin123')}
-                  className="flex justify-between items-center p-1 rounded hover:bg-gray-100 cursor-pointer transition-colors"
-                >
-                  <span>Admin: <strong className="text-gray-800">admin</strong></span>
-                  <span className="text-[10px] text-[#990024] font-semibold">Click to fill</span>
-                </div>
-                <div
-                  onClick={() => fillCredentials('itstaff', 'staff123')}
-                  className="flex justify-between items-center p-1 rounded hover:bg-gray-100 cursor-pointer transition-colors"
-                >
-                  <span>Staff: <strong className="text-gray-800">itstaff</strong></span>
-                  <span className="text-[10px] text-[#990024] font-semibold">Click to fill</span>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

@@ -217,11 +217,13 @@ test('compliance boundaries are inclusive and target attainment uses SLA percent
   assert.equal(afterDeadline.targetAttainment.resolution[0].goalMet, false);
 });
 
-test('active ticket overdue checks use exact stored deadlines and include On Hold tickets', () => {
+test('active ticket overdue checks use exact stored deadlines and On Hold pauses the SLA clock', () => {
   const dueAt = new Date('2026-02-02T10:00:00.000Z');
-  const ticket = { status: 'OnHold', responseDueAt: null, slaDueAt: dueAt, resolvedAt: null };
+  const ticket = { status: 'InProgress', responseDueAt: null, slaDueAt: dueAt, resolvedAt: null };
   assert.equal(isActiveTicketOverdue(ticket, dueAt), false);
   assert.equal(isActiveTicketOverdue(ticket, new Date(dueAt.getTime() + 1)), true);
+  // Team decision: On Hold tickets are not overdue; their deadlines move when they resume.
+  assert.equal(isActiveTicketOverdue({ ...ticket, status: 'OnHold' }, new Date(dueAt.getTime() + 1)), false);
   assert.equal(isActiveTicketOverdue({ ...ticket, status: 'Resolved' }, new Date(dueAt.getTime() + 1)), false);
 });
 
@@ -236,20 +238,25 @@ test('Category Issues only returns the exact SLA allowlist and hides unmatched c
   assert.equal(result.some(item => item.name === 'Unlisted category'), false);
 });
 
-test('SLA timeline routes enforce the admin role', () => {
-  const { requireAdmin } = require('../src/middleware/auth');
+test('SLA timeline routes require the service-desk settings permission', async () => {
   const operationsRouter = require('../src/routes/operations');
   const timelineRoutes = operationsRouter.stack
     .filter(layer => layer.route && layer.route.path.startsWith('/sla-timelines'));
-
   assert.equal(timelineRoutes.length, 3);
-  for (const layer of timelineRoutes) {
-    assert.ok(layer.route.stack.some(handler => handler.handle === requireAdmin));
-  }
 
+  // Every timeline route has a permission guard that rejects a user without the permission.
+  const { createPermissionMiddleware } = require('../src/services/accessControlService');
+  const fakeClient = { userRole: { findFirst: async ({ where }) => {
+    const keys = where.role.permissions.some.permission.key.in;
+    return keys.includes('settings.service-desk') ? null : { id: 'x' };
+  } } };
+  const guard = createPermissionMiddleware(fakeClient)('settings.service-desk');
   const response = responseRecorder();
   let nextCalled = false;
-  requireAdmin({ user: { role: 'staff' } }, response, () => { nextCalled = true; });
+  await guard({ user: { id: 'officer-1' } }, response, () => { nextCalled = true; });
   assert.equal(nextCalled, false);
   assert.equal(response.statusCode, 403);
+  for (const layer of timelineRoutes) {
+    assert.ok(layer.route.stack.length >= 3, 'authenticate + permission + handler');
+  }
 });

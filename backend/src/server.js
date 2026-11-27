@@ -88,6 +88,14 @@ app.use((err, req, res, next) => {
     return res.status(403).json({ success: false, message: 'CORS origin denied' });
   }
 
+  if (err?.type === 'entity.parse.failed') {
+    return res.status(400).json({ success: false, message: 'Request body is not valid JSON' });
+  }
+
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ success: false, message: 'Request body is too large' });
+  }
+
   if (err?.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ success: false, message: 'Uploaded file is too large' });
   }
@@ -106,18 +114,28 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`✓ API available at http://${HOST}:${PORT}`);
   startNotificationJobs();
 
-  // Start email monitoring if credentials are configured
-  if (process.env.EMAIL_USER && process.env.IMAP_USER) {
-    try {
+  // Keep the permission catalogue and system roles (Administrator, ICT Manager, ICT Officer,
+  // Viewer, Requester) in step with the code; idempotent.
+  require('./services/accessControlService').ensureDefaultRoles(prisma)
+    .then(() => console.log('✓ Access roles synchronised'))
+    .catch(error => console.error('Access role synchronisation failed:', error.message));
+
+  // Encrypt any credentials still stored as plaintext (legacy rows); idempotent.
+  require('./services/secretBox').encryptStoredSecrets(prisma)
+    .then(count => { if (count) console.log(`✓ Encrypted stored credentials in ${count} settings record(s)`); })
+    .catch(error => console.error('Credential encryption check failed:', error.message));
+
+  // Inbound email: Settings → Email (incoming mail) or IMAP_* environment variables.
+  require('./services/emailService').getImapConfig()
+    .then(config => {
+      if (!config) {
+        console.log('⚠ Inbound email monitoring disabled - enable incoming mail in Settings → Email');
+        return;
+      }
       console.log('Starting email monitoring...');
       startEmailMonitoring();
-    } catch (error) {
-      console.error('Failed to start email monitoring:', error.message);
-      console.log('Server will continue without email monitoring');
-    }
-  } else {
-    console.log('⚠ Email monitoring disabled - configure EMAIL_USER and IMAP_USER in .env to enable');
-  }
+    })
+    .catch(error => console.error('Failed to start email monitoring:', error.message));
 });
 
 // ─────────────────────────────────────────────────────────────

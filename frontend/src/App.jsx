@@ -13,66 +13,77 @@ import AdminPanel from './components/admin/AdminPanel';
 import { authService } from './services/authService';
 import { settingsService } from './services/settingsService';
 import { accessControlService } from './services/accessControlService';
-import { useTickets } from './hooks/useTickets';
-import { useStatistics } from './hooks/useStatistics';
 import { useIdleLogout } from './hooks/useIdleLogout';
+import { can, SCREENS } from './utils/permissions';
 
 function App() {
+  // The session is an httpOnly cookie; the cached profile only drives the initial UI and is
+  // confirmed with the server below.
   const initialUser = authService.getCurrentUser();
-  const initialToken = localStorage.getItem('token');
-  const [showHomePage, setShowHomePage] = useState(!(initialUser && initialToken));
-  const [isAuthenticated, setIsAuthenticated] = useState(Boolean(initialUser && initialToken));
-  const [currentUser, setCurrentUser] = useState(initialUser && initialToken ? initialUser : null);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [showHomePage, setShowHomePage] = useState(!initialUser);
+  const [isAuthenticated, setIsAuthenticated] = useState(Boolean(initialUser));
+  const [currentUser, setCurrentUser] = useState(initialUser);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [selectedTab, setActiveTab] = useState(null);
+  const [accessLoaded, setAccessLoaded] = useState(false);
   const [dashboardTicketFilter, setDashboardTicketFilter] = useState(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
-  const { tickets, isLoading: ticketsLoading, error: ticketsError, fetchTickets } = useTickets(isAuthenticated);
-  const { statistics, isLoading: statsLoading } = useStatistics(isAuthenticated);
+  // Confirm the cookie session once on load (it may have expired or been revoked).
+  useEffect(() => {
+    if (!initialUser) return;
+    authService.validateSession().then(result => {
+      if (result.success) {
+        setCurrentUser(user => ({ ...user, ...result.user }));
+      } else {
+        localStorage.removeItem('user');
+        setCurrentUser(null);
+        setIsAuthenticated(false);
+        setShowHomePage(false);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const refreshData = () => setRefreshKey(key => key + 1);
   useEffect(() => {
     let active = true;
     if (!isAuthenticated) return () => { active = false; };
     accessControlService.getMyAccess()
       .then(access => {
         if (active) {
-          setCurrentUser(user => user ? {
-            ...user,
-            permissions: access.permissions || [],
-            isAdmin: Boolean(access.isAdmin)
-          } : user);
+          setCurrentUser(user => {
+            if (!user) return user;
+            const next = { ...user, permissions: access.permissions || [], roles: access.roles || [], isAdmin: Boolean(access.isAdmin) };
+            // Cache for screens that read the profile directly (UI hints only; the API enforces).
+            localStorage.setItem('user', JSON.stringify(next));
+            return next;
+          });
+          setAccessLoaded(true);
         }
       })
       .catch(error => {
         console.error('Unable to load current access permissions:', error);
         if (active) {
           setCurrentUser(user => user ? { ...user, permissions: [], isAdmin: false } : user);
+          setAccessLoaded(true);
         }
       });
     return () => { active = false; };
   }, [isAuthenticated, currentUser?.id]);
 
-
+  // The API client raises this when the server rejects the session (expired or revoked).
   useEffect(() => {
-    let active = true;
-    if (!isAuthenticated) return () => { active = false; };
-    accessControlService.getMyAccess()
-      .then(access => {
-        if (active) {
-          setCurrentUser(user => user ? {
-            ...user,
-            permissions: access.permissions || [],
-            isAdmin: Boolean(access.isAdmin)
-          } : user);
-        }
-      })
-      .catch(error => {
-        console.error('Unable to load current access permissions:', error);
-        if (active) {
-          setCurrentUser(user => user ? { ...user, permissions: [], isAdmin: false } : user);
-        }
-      });
-    return () => { active = false; };
-  }, [isAuthenticated, currentUser?.id]);
+    const onExpired = () => {
+      setAccessLoaded(false);
+      setCurrentUser(null);
+      setIsAuthenticated(false);
+      setShowHomePage(false);
+      toast('Your session has ended. Please sign in again.');
+    };
+    window.addEventListener('auth:expired', onExpired);
+    return () => window.removeEventListener('auth:expired', onExpired);
+  }, []);
 
   useEffect(() => {
     const applyBranding = async () => {
@@ -101,11 +112,15 @@ function App() {
   };
 
   const handleLogout = () => {
+    setAccessLoaded(false);
     authService.logout();
     setCurrentUser(null);
     setIsAuthenticated(false);
     setShowHomePage(true);
   };
+
+  const allowedScreens = SCREENS.filter(screen => can(currentUser, ...screen.permissions)).map(screen => screen.id);
+  const activeTab = allowedScreens.includes(selectedTab) ? selectedTab : allowedScreens[0];
 
   useIdleLogout(isAuthenticated, () => {
     handleLogout();
@@ -123,10 +138,28 @@ function App() {
 
   if (!isAuthenticated) {
     return (
-      <LoginPage
-        onLogin={handleLogin}
-        onBack={() => setShowHomePage(true)}
-      />
+      <>
+        <LoginPage
+          onLogin={handleLogin}
+          onBack={() => setShowHomePage(true)}
+        />
+        <Toaster position="top-right" toastOptions={{ className: "font-mono text-xs border border-zinc-200 bg-white text-zinc-900 shadow-lg rounded-lg p-3", duration: 3500 }} />
+      </>
+    );
+  }
+
+  if (!accessLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center font-mono text-xs text-zinc-500">Loading your access...</div>
+    );
+  }
+
+  if (!allowedScreens.length) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 p-6 text-center">
+        <p className="text-sm text-zinc-700">Your account has no role in the ICT service desk yet. Ask an administrator to assign you a role.</p>
+        <button type="button" onClick={handleLogout} className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm">Sign out</button>
+      </div>
     );
   }
 
@@ -147,17 +180,14 @@ function App() {
         <TopBar
           activeTab={activeTab}
           onOpenMobileMenu={() => setMobileSidebarOpen(true)}
-          onRefresh={fetchTickets}
-          isLoading={ticketsLoading}
+          onRefresh={refreshData}
+          isLoading={false}
         />
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
           {activeTab === 'dashboard' && (
             <DashboardView
-              tickets={tickets}
-              statistics={statistics}
-              isLoading={statsLoading}
-              error={ticketsError}
+              refreshKey={refreshKey}
               onViewTickets={filter => {
                 setDashboardTicketFilter(filter);
                 setActiveTab('tickets');
@@ -166,16 +196,13 @@ function App() {
           )}
           {activeTab === 'tickets' && (
             <TicketsView
-              tickets={tickets}
-              isLoading={ticketsLoading}
-              error={ticketsError}
-              onRefresh={fetchTickets}
+              refreshKey={refreshKey}
               dashboardFilter={dashboardTicketFilter}
               onClearDashboardFilter={() => setDashboardTicketFilter(null)}
             />
           )}
           {activeTab === 'departments' && (
-            <DepartmentsView />
+            <DepartmentsView refreshKey={refreshKey} />
           )}
           {activeTab === 'users' && (
             <UsersView />

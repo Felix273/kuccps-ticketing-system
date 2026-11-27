@@ -62,29 +62,39 @@ test('permission middleware fails closed when there is no authenticated user', a
   assert.equal(res.statusCode, 401);
 });
 
-test('non-admin roles cannot receive access-control management permission', () => {
-  assert.equal(isValidRolePermissionSet('support', ['settings.email.view']), true);
-  assert.equal(isValidRolePermissionSet('support', ['access-control.manage']), false);
-  assert.equal(isValidRolePermissionSet('admin', ['access-control.manage']), true);
+test('non-admin roles cannot receive access management permission', () => {
+  assert.equal(isValidRolePermissionSet('officer', ['settings.email']), true);
+  assert.equal(isValidRolePermissionSet('officer', ['access.manage']), false);
+  assert.equal(isValidRolePermissionSet('admin', ['access.manage']), true);
 });
 
-test('write permissions automatically include the matching view permission', () => {
+test('ticket actions and publishing imply the permissions they depend on; unknown keys are dropped', () => {
   assert.deepEqual(
-    normalizeRolePermissionKeys(['settings.forms.create', 'settings.email.update']),
-    ['settings.forms.create', 'settings.email.update', 'settings.forms.view', 'settings.email.view']
+    normalizeRolePermissionKeys(['tickets.assign', 'knowledge.publish', 'not.a.permission']).sort(),
+    ['knowledge.contribute', 'knowledge.publish', 'tickets.assign', 'tickets.view']
   );
 });
 
-test('settings updates require the permission for every submitted field', () => {
-  assert.deepEqual(
-    getRequiredSettingsPermissions(['organizationName', 'logoUrl']),
-    ['settings.organization.update']
-  );
+test('settings updates require the manage permission for every submitted area', () => {
+  assert.deepEqual(getRequiredSettingsPermissions(['organizationName', 'primaryColor']), ['settings.organization']);
   assert.deepEqual(
     getRequiredSettingsPermissions(['organizationName', 'smtpHost']),
-    ['settings.organization.update', 'settings.email.update']
+    ['settings.organization', 'settings.email']
   );
+  assert.deepEqual(getRequiredSettingsPermissions(['slaWarningPercent']), ['settings.service-desk']);
+  // Retired settings (maintenance mode, logo URL, dark mode...) are rejected.
+  assert.equal(getRequiredSettingsPermissions(['logoUrl']), null);
   assert.equal(getRequiredSettingsPermissions(['admin']), null);
+});
+
+test('system roles describe a realistic ICT directorate', () => {
+  const { SYSTEM_ROLES, PERMISSIONS } = require('../src/services/accessControlService');
+  const byName = Object.fromEntries(SYSTEM_ROLES.map(role => [role.name, new Set(role.permissions)]));
+  assert.equal(byName.admin.size, PERMISSIONS.length);
+  assert.ok(byName.manager.has('tickets.assign') && byName.manager.has('knowledge.publish') && !byName.manager.has('access.manage'));
+  assert.ok(byName.officer.has('tickets.work') && !byName.officer.has('tickets.assign') && !byName.officer.has('knowledge.publish'));
+  assert.ok(byName.viewer.has('tickets.view') && !byName.viewer.has('tickets.work'));
+  assert.equal(byName.user.size, 0);
 });
 
 test('a user cannot change their own roles', () => {

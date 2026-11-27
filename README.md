@@ -114,8 +114,8 @@ Located in `google-addon/`.
 
 - Ticket creation through public intake endpoints
 - Unique ticket numbers using the configured prefix and date format
-- Ticket status workflow: `Open`, `In Progress`, `Resolved`, `Closed`
-- Priority levels: `Low`, `Medium`, `High`, `Critical`
+- Ticket status workflow: `Open`, `InProgress`, `OnHold`, `Resolved`, `Closed` (API values; the UI shows "In Progress"/"On Hold")
+- Priority levels: `VeryLow`, `Low`, `Medium`, `High`, `VeryHigh` ("critical"/"urgent" inputs are normalised)
 - Category-based ticket grouping
 - Department assignment
 - Staff/admin assignment
@@ -137,11 +137,13 @@ Located in `google-addon/`.
 
 ### Authentication and authorization
 
-- JWT bearer-token authentication
-- Protected staff/admin routes
-- Admin-only management routes
-- Token-based profile endpoint
-- Client-side token removal on authentication failures
+- Browser sessions use an httpOnly, SameSite=Strict cookie (`kuccps_session`, path `/api`); the token is never readable by page scripts. State-changing cookie requests must send `X-Requested-With: XMLHttpRequest` (CSRF protection). API clients can still use `Authorization: Bearer` by logging in with the `X-Auth-Mode: bearer` header.
+- JWTs are HS256 only, default lifetime 8h
+- Server-side logout: `POST /api/auth/logout` revokes every token issued to the user before that moment
+- Only `staff` and `admin` accounts can sign in (local and Active Directory)
+- Directory-synced (AD) accounts must authenticate against AD; their local password is a random placeholder
+- Protected staff/admin routes and admin-only management routes
+- The UI returns to the login screen when the server reports an expired or revoked session
 
 ### Email and notifications
 
@@ -219,7 +221,7 @@ Defined in `backend/src/routes/auth.js`.
 | Method | Route | Auth | Description |
 | --- | --- | --- | --- |
 | POST | `/login` | Public | Authenticate a user and return a JWT token |
-| POST | `/logout` | Public | Logout endpoint for client-side token cleanup |
+| POST | `/logout` | JWT | Revoke all of the current user's tokens |
 | GET | `/profile` | JWT | Return the current authenticated user |
 
 ### Tickets: `/api/tickets`
@@ -228,15 +230,25 @@ Defined in `backend/src/routes/tickets.js`.
 
 | Method | Route | Auth | Description |
 | --- | --- | --- | --- |
-| POST | `/public/tickets` | Public API key | Create a ticket for Google Add-on/public intake |
 | POST | `/` | Staff/Admin | Disabled; returns 403 |
-| GET | `/` | Staff/Admin | List all tickets |
+| GET | `/` | Staff/Admin | Paginated list: `page`, `pageSize` (max 100), `segment`, `q`, `status`, `priority`, `departmentId`, `assignedToId` (`me`/`unassigned`/id), `ticketNumber`, `subject`, `requesterEmail`, `dateFrom`, `dateTo`, `hasSla`, `hasCsat`, `sortBy`, `sortOrder`. Returns `tickets`, `pagination`, `segmentCounts` |
+| GET | `/export` | Staff/Admin | Same filters as the list, up to 10,000 rows for CSV export |
+| GET | `/overview` | Staff/Admin | Dashboard aggregates (status totals, 7-day trend, directorates, watchlist, leaderboard) |
+| GET | `/workload` | Staff/Admin | Ticket counts per directorate and per officer |
 | GET | `/statistics` | Staff/Admin | Return ticket statistics |
 | GET | `/:id` | Staff/Admin | Get one ticket with comments, attachments, and history |
 | PUT | `/:id` | Staff/Admin | Update ticket status, priority, assignee, department, category, SLA |
 | POST | `/:id/escalate` | Staff/Admin | Escalate a ticket to another staff/admin user |
 | POST | `/:id/comments` | Staff/Admin | Add a ticket comment |
 | POST | `/:id/attachments` | Staff/Admin | Upload a ticket attachment |
+
+Public intake is served by `backend/src/routes/publicTickets.js`, mounted at `/api/public/tickets` (and the legacy alias `/api/tickets/public`), rate limited and protected by `PUBLIC_TICKET_API_KEY`:
+
+| Method | Route | Description |
+| --- | --- | --- |
+| POST | `/api/public/tickets` | Create a ticket (Google Add-on/public intake) |
+| GET | `/api/public/tickets/my-tickets?email=` | A requester's 20 most recent tickets with `csatRated` (used by the add-on) |
+| POST | `/api/public/tickets/csat` | Requester rating `{ ticketId, rating, comment, requesterEmail }`; closes a Resolved ticket |
 
 The protected `POST /api/tickets` route is intentionally disabled so staff do not manually create tickets from the admin UI. Ticket creation is handled through public intake endpoints.
 
@@ -321,9 +333,10 @@ Defined in `backend/src/routes/operations.js`.
 | GET | `/sla-policies` | Staff/Admin | List SLA policies |
 | POST | `/sla-policies` | Admin | Create an SLA policy |
 | PUT | `/sla-policies/:id` | Admin | Update an SLA policy |
-| POST | `/csat` | JWT | Submit a CSAT response |
-| GET | `/csat/public?token=...` | Public | Validate a feedback link from a resolved-ticket email |
-| POST | `/csat/public` | Public | Submit feedback from a feedback link |
+| POST | `/csat` | JWT | Submit a CSAT response (ticket requester only) |
+| GET | `/csat/public?token=...` | Public | Validate a signed feedback link from a resolved-ticket email |
+| POST | `/csat/public` | Public | Record the rating (closes a Resolved ticket); a later call with a comment attaches it |
+| GET | `/csat/rate` | Public | Retired legacy unsigned link; returns 410 |
 
 ### Notifications: `/api/notifications`
 
@@ -490,7 +503,13 @@ NODE_ENV=development
 
 # JWT
 JWT_SECRET=change-this-to-a-long-random-secret
-JWT_EXPIRES_IN=7d
+JWT_EXPIRES_IN=8h
+# Timezone used for the date part of ticket numbers (default Africa/Nairobi)
+TICKET_TIMEZONE=Africa/Nairobi
+# 32 random bytes as hex: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+SETTINGS_ENCRYPTION_KEY=
+# Rate limit storage: database (shared across instances, default) or memory
+RATE_LIMIT_STORE=database
 
 # CORS
 FRONTEND_URL=http://localhost:5173,http://localhost:5174
@@ -678,6 +697,14 @@ or a bearer token containing the public API key, depending on server configurati
 - Rate limiting is applied globally and to sensitive routes such as authentication and public ticket intake.
 - Public ticket intake requires a configured API key in production.
 - Production validation rejects unsafe LDAP, CORS, and public API key settings.
+- Requester-supplied text (subject, description, names, comments) is HTML-escaped in outgoing emails.
+- Settings updates are validated server-side (types, colours, URLs, ports, ticket prefix, defaults).
+- Inbound email only adds a reply to a ticket when it comes from the ticket's requester or from ICT staff whose message did not fail SPF/DKIM/DMARC; other senders get a new ticket. Auto-replies, bounces and self-sent mail are ignored, and each Message-ID is processed once.
+- Ticket attachments must match both the built-in MIME/extension allow-list and the administrator's allowed file types and maximum size.
+- Public knowledge-base responses omit revision history and internal author fields.
+- SMTP, IMAP and LDAP passwords are encrypted at rest with AES-256-GCM using `SETTINGS_ENCRYPTION_KEY` (required in production). Existing plaintext values are encrypted automatically at startup. To rotate, move the old key to `SETTINGS_ENCRYPTION_KEY_PREVIOUS`, set a new key, restart, then re-save the passwords in Settings.
+- Rate limits are stored in PostgreSQL (`RateLimitBucket`), so they hold across multiple backend instances. Set `RATE_LIMIT_STORE=memory` only for a single instance without database-backed limits.
+- CSV exports quote every cell and neutralise spreadsheet formulas.
 
 ## Deployment checklist
 

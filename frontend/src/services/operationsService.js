@@ -1,6 +1,10 @@
 import { api } from './api';
 
 export const operationsService = {
+  getCsatReport() {
+    return api.get('/operations/csat-report');
+  },
+
   getDashboardAnalytics(params = {}) {
     const query = new URLSearchParams(params).toString();
     return api.get(`/operations/dashboard${query ? `?${query}` : ''}`);
