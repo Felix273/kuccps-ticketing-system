@@ -113,8 +113,8 @@ const TicketSettings = () => {
             disabled={saving}
           >
             <option value="Open">Open</option>
-            <option value="In Progress">In Progress</option>
-            <option value="On Hold">On Hold</option>
+            <option value="InProgress">In Progress</option>
+            <option value="OnHold">On Hold</option>
           </select>
         </div>
       </div>

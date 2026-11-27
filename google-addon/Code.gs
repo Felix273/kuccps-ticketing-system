@@ -43,8 +43,8 @@ function getConfig() {
   return {
     BASE_URL: baseUrl,
     PUBLIC_TICKET_URL: baseUrl + '/public/tickets',
-    MY_TICKETS_URL: baseUrl + '/tickets/public/my-tickets',
-    CSAT_URL: baseUrl + '/operations/csat/public',
+    MY_TICKETS_URL: baseUrl + '/public/tickets/my-tickets',
+    CSAT_URL: baseUrl + '/public/tickets/csat',
     SUPPORT_EMAIL: cleanProperty(properties.getProperty('SUPPORT_EMAIL')) || DEFAULT_CONFIG.SUPPORT_EMAIL,
     BACKEND_API_KEY: cleanProperty(properties.getProperty('BACKEND_API_KEY')) || DEFAULT_CONFIG.BACKEND_API_KEY
   };

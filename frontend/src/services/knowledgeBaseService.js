@@ -4,7 +4,7 @@ export const knowledgeBaseService = {
   getArticles(params = {}) {
     // Filter out undefined/null/empty strings so URLSearchParams doesn't serialize 'undefined'
     const cleanParams = Object.fromEntries(
-      Object.entries(params).filter(([_, v]) => v !== undefined && v !== null && v !== '' && v !== 'undefined')
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '' && v !== 'undefined')
     );
     const query = new URLSearchParams(cleanParams).toString();
     return api.get(`/knowledge-base/articles${query ? `?${query}` : ''}`);
@@ -53,11 +53,8 @@ export const knowledgeBaseService = {
       if (value !== undefined && value !== null) formData.append(key, value);
     });
 
-    const response = await fetch(`${api.baseURL}/knowledge-base/materials/upload`, {
+    const response = await api.rawFetch('/knowledge-base/materials/upload', {
       method: 'POST',
-      headers: {
-        ...api.getAuthHeader()
-      },
       body: formData
     });
     return response.json();

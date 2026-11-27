@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
+import { useTicketPage } from '../../hooks/useTicketPage';
 import { 
   X, 
   User, 
@@ -13,39 +14,39 @@ import {
 } from 'lucide-react';
 import { PRIORITY_LEVELS, normalizePriority } from '../../utils/constants';
 
-export const UserTicketsDrawer = ({ user, tickets = [], onClose, onReassign }) => {
+const DRAWER_PAGE_SIZE = 100;
+
+// Tickets are loaded from the server, filtered by assignee (and the drawer's filters).
+export const UserTicketsDrawer = ({ user, refreshKey = 0, onClose, onReassign }) => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterPriority, setFilterPriority] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Get user's tickets
-  const userTickets = useMemo(() => {
-    return tickets.filter(t => t.assignedToId === user.id);
-  }, [tickets, user]);
+  // Overall counts for this officer (unfiltered); pageSize 1 because only the counts are needed.
+  const { segmentCounts, pagination: totals } = useTicketPage(
+    { assignedToId: user.id, pageSize: 1 },
+    { refreshKey }
+  );
+  const { tickets: filteredTickets, pagination } = useTicketPage(
+    {
+      assignedToId: user.id,
+      status: filterStatus,
+      priority: filterPriority,
+      q: searchQuery.trim(),
+      pageSize: DRAWER_PAGE_SIZE
+    },
+    { refreshKey }
+  );
 
-  // Filter tickets
-  const filteredTickets = useMemo(() => {
-    return userTickets.filter(ticket => {
-      const matchesStatus = filterStatus === 'all' || ticket.status === filterStatus;
-      const matchesPriority = filterPriority === 'all' || normalizePriority(ticket.priority) === filterPriority;
-      const matchesSearch = 
-        !searchQuery.trim() ||
-        ticket.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        ticket.ticketNumber?.toLowerCase().includes(searchQuery.toLowerCase());
-      
-      return matchesStatus && matchesPriority && matchesSearch;
-    });
-  }, [userTickets, filterStatus, filterPriority, searchQuery]);
-
-  // Statistics
+  const total = totals.total;
   const stats = {
-    total: userTickets.length,
-    open: userTickets.filter(t => t.status === 'Open').length,
-    inProgress: userTickets.filter(t => t.status === 'InProgress').length,
-    onHold: userTickets.filter(t => t.status === 'OnHold').length,
-    resolved: userTickets.filter(t => t.status === 'Resolved').length,
-    closed: userTickets.filter(t => t.status === 'Closed').length
+    total,
+    inProgress: segmentCounts['in-progress'] ?? 0,
+    onHold: segmentCounts['on-hold'] ?? 0,
+    resolved: segmentCounts.resolved ?? 0,
+    closed: segmentCounts.closed ?? 0
   };
+  stats.open = Math.max(0, total - stats.inProgress - stats.onHold - stats.resolved - stats.closed);
 
   const renderStatus = (status) => {
     switch (status) {
@@ -204,8 +205,8 @@ export const UserTicketsDrawer = ({ user, tickets = [], onClose, onReassign }) =
               >
                 <option value="all">Status: All</option>
                 <option value="Open">Open</option>
-                <option value="In Progress">In Progress</option>
-                <option value="On Hold">On Hold</option>
+                <option value="InProgress">In Progress</option>
+                <option value="OnHold">On Hold</option>
                 <option value="Resolved">Resolved</option>
                 <option value="Closed">Closed</option>
               </select>
@@ -221,7 +222,9 @@ export const UserTicketsDrawer = ({ user, tickets = [], onClose, onReassign }) =
             </div>
 
             <span className="font-mono text-[11px] text-zinc-400">
-              {filteredTickets.length} of {userTickets.length}
+              {pagination.total > filteredTickets.length
+                ? `first ${filteredTickets.length} of ${pagination.total} matching`
+                : `${pagination.total} of ${total}`}
             </span>
           </div>
         </div>
@@ -280,7 +283,7 @@ export const UserTicketsDrawer = ({ user, tickets = [], onClose, onReassign }) =
               <FileText className="w-8 h-8 text-zinc-300 mx-auto mb-2" />
               <h4 className="text-xs font-bold text-zinc-800">NO_ASSIGNED_TICKETS</h4>
               <p className="text-[11px] text-zinc-400 mt-0.5">
-                {userTickets.length === 0 ? 'No tickets are currently assigned to this user.' : 'No tickets match the selected filters.'}
+                {total === 0 ? 'No tickets are currently assigned to this user.' : 'No tickets match the selected filters.'}
               </p>
             </div>
           )}

@@ -1,7 +1,6 @@
 const {
   CSAT_SATISFIED_MIN_RATING,
   calculateSatisfactionRate,
-  createCsatLinks,
   verifyCsatToken
 } = require('../services/csatService');
 const {
@@ -14,6 +13,7 @@ const {
   validateSlaPolicyUpdates
 } = require('../services/slaService');
 const prisma = require('../lib/prisma');
+const { normalizePriority } = require('../services/ticketEnums');
 
 const OPEN_STATUSES = new Set(['Open', 'InProgress', 'OnHold']);
 const RESOLVED_STATUSES = new Set(['Resolved', 'Closed']);
@@ -43,15 +43,6 @@ function getNextSlaDeadline(ticket) {
   if (ticket.responseDueAt && !ticket.firstRespondedAt) deadlines.push(new Date(ticket.responseDueAt));
   if (ticket.slaDueAt && !ticket.resolvedAt) deadlines.push(new Date(ticket.slaDueAt));
   return deadlines.sort((left, right) => left - right)[0] || null;
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function buildAiInsights(tickets, users) {
@@ -174,14 +165,27 @@ function buildAiInsights(tickets, users) {
     .sort((a, b) => a.activeTickets - b.activeTickets)
     .slice(0, 5);
 
+  // Tokenise each active ticket once and compare only within the same category.
+  const activeTerms = new Map(activeTickets.map(ticket => [
+    ticket.id,
+    new Set(getTerms(`${ticket.subject} ${ticket.description}`))
+  ]));
+  const activeByCategory = new Map();
+  for (const ticket of activeTickets) {
+    if (!activeByCategory.has(ticket.category)) activeByCategory.set(ticket.category, []);
+    activeByCategory.get(ticket.category).push(ticket);
+  }
   const duplicateSignals = activeTickets
     .map(ticket => {
-      const terms = getTerms(`${ticket.subject} ${ticket.description}`);
-      const related = activeTickets.filter(other => {
-        if (other.id === ticket.id || other.category !== ticket.category) return false;
-        const otherTerms = new Set(getTerms(`${other.subject} ${other.description}`));
-        const overlap = terms.filter(term => otherTerms.has(term)).length;
-        return overlap >= 3;
+      const terms = activeTerms.get(ticket.id);
+      const related = activeByCategory.get(ticket.category).filter(other => {
+        if (other.id === ticket.id) return false;
+        const otherTerms = activeTerms.get(other.id);
+        let overlap = 0;
+        for (const term of terms) {
+          if (otherTerms.has(term) && ++overlap >= 3) return true;
+        }
+        return false;
       });
       return related.length ? {
         ticketNumber: ticket.ticketNumber,
@@ -281,21 +285,67 @@ exports.getSlaPolicies = async (req, res) => {
   }
 };
 
+const MAX_SLA_MINUTES = 365 * 24 * 60;
+
+// Validates SLA policy input; returns { data, error }. `partial` allows omitted fields (updates).
+async function validateSlaPolicyInput(body, { partial }) {
+  const input = body || {};
+  const data = {};
+  if (input.name !== undefined || !partial) {
+    if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 120) {
+      return { error: 'SLA policy name is required (max 120 characters)' };
+    }
+    data.name = input.name.trim();
+  }
+  if (input.priority !== undefined) {
+    if (input.priority === null || input.priority === '') data.priority = null;
+    else {
+      data.priority = normalizePriority(input.priority);
+      if (!data.priority) return { error: 'Invalid SLA priority' };
+    }
+  }
+  if (input.category !== undefined) {
+    if (input.category !== null && typeof input.category !== 'string') return { error: 'Category must be text' };
+    data.category = input.category ? input.category.trim().slice(0, 120) : null;
+  }
+  if (input.departmentId !== undefined) {
+    if (input.departmentId) {
+      if (typeof input.departmentId !== 'string') return { error: 'Invalid department' };
+      const department = await prisma.department.findUnique({ where: { id: input.departmentId }, select: { id: true } });
+      if (!department) return { error: 'Selected department does not exist' };
+    }
+    data.departmentId = input.departmentId || null;
+  }
+  for (const [field, fallback] of [['responseMinutes', 240], ['resolutionMinutes', 1440]]) {
+    if (input[field] === undefined) {
+      if (!partial) data[field] = fallback;
+      continue;
+    }
+    const minutes = Number(input[field]);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > MAX_SLA_MINUTES) {
+      return { error: `${field} must be a whole number of minutes between 1 and ${MAX_SLA_MINUTES}` };
+    }
+    data[field] = minutes;
+  }
+  const response = data.responseMinutes;
+  const resolution = data.resolutionMinutes;
+  if (response !== undefined && resolution !== undefined && response > resolution) {
+    return { error: 'Response time cannot be longer than resolution time' };
+  }
+  if (input.isActive !== undefined) {
+    if (typeof input.isActive !== 'boolean') return { error: 'isActive must be true or false' };
+    data.isActive = input.isActive;
+  } else if (!partial) {
+    data.isActive = true;
+  }
+  return { data };
+}
+
 exports.createSlaPolicy = async (req, res) => {
   try {
-    const { name, priority, category, departmentId, responseMinutes, resolutionMinutes, isActive } = req.body;
-    if (!name) return res.status(400).json({ success: false, message: 'SLA policy name is required' });
-    const policy = await prisma.slaPolicy.create({
-      data: {
-        name,
-        priority: priority || null,
-        category: category || null,
-        departmentId: departmentId || null,
-        responseMinutes: responseMinutes || 240,
-        resolutionMinutes: resolutionMinutes || 1440,
-        isActive: isActive !== false
-      }
-    });
+    const { data, error } = await validateSlaPolicyInput(req.body, { partial: false });
+    if (error) return res.status(400).json({ success: false, message: error });
+    const policy = await prisma.slaPolicy.create({ data });
     res.status(201).json({ success: true, policy });
   } catch (error) {
     console.error('Create SLA policy error:', error);
@@ -305,19 +355,16 @@ exports.createSlaPolicy = async (req, res) => {
 
 exports.updateSlaPolicy = async (req, res) => {
   try {
-    const { name, priority, category, departmentId, responseMinutes, resolutionMinutes, isActive } = req.body;
-    const policy = await prisma.slaPolicy.update({
-      where: { id: req.params.id },
-      data: {
-        ...(name !== undefined && { name }),
-        ...(priority !== undefined && { priority }),
-        ...(category !== undefined && { category }),
-        ...(departmentId !== undefined && { departmentId }),
-        ...(responseMinutes !== undefined && { responseMinutes }),
-        ...(resolutionMinutes !== undefined && { resolutionMinutes }),
-        ...(isActive !== undefined && { isActive })
-      }
-    });
+    const existing = await prisma.slaPolicy.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ success: false, message: 'SLA policy not found' });
+    const { data, error } = await validateSlaPolicyInput(req.body, { partial: true });
+    if (error) return res.status(400).json({ success: false, message: error });
+    const responseMinutes = data.responseMinutes ?? existing.responseMinutes;
+    const resolutionMinutes = data.resolutionMinutes ?? existing.resolutionMinutes;
+    if (responseMinutes > resolutionMinutes) {
+      return res.status(400).json({ success: false, message: 'Response time cannot be longer than resolution time' });
+    }
+    const policy = await prisma.slaPolicy.update({ where: { id: existing.id }, data });
     res.json({ success: true, policy });
   } catch (error) {
     console.error('Update SLA policy error:', error);
@@ -386,11 +433,77 @@ exports.resetSlaTimelines = async (req, res) => {
   }
 };
 
+const CSAT_RESPONSE_SELECT = { id: true, rating: true, comment: true, createdAt: true };
+
+/**
+ * Records a requester's satisfaction rating once per ticket and closes a Resolved ticket.
+ * A comment sent after the rating (the feedback page saves the rating first) is attached
+ * to the existing response instead of being discarded.
+ */
+async function recordRequesterCsat({ ticket, rating, comment, userId }) {
+  const safeComment = typeof comment === 'string' ? comment.trim().slice(0, 2000) : '';
+  let response = await prisma.csatResponse.findFirst({
+    where: { ticketId: ticket.id },
+    orderBy: { createdAt: 'desc' },
+    select: CSAT_RESPONSE_SELECT
+  });
+  let alreadyRecorded = Boolean(response);
+
+  if (!response) {
+    try {
+      response = await prisma.csatResponse.create({
+        data: { ticketId: ticket.id, rating, comment: safeComment || null, userId: userId || null },
+        select: CSAT_RESPONSE_SELECT
+      });
+    } catch (error) {
+      if (error.code !== 'P2002') throw error;
+      // A concurrent submission won the race; use the stored response.
+      response = await prisma.csatResponse.findFirst({ where: { ticketId: ticket.id }, select: CSAT_RESPONSE_SELECT });
+      alreadyRecorded = true;
+    }
+  }
+
+  if (alreadyRecorded && safeComment && !response.comment) {
+    response = await prisma.csatResponse.update({
+      where: { id: response.id },
+      data: { comment: safeComment },
+      select: CSAT_RESPONSE_SELECT
+    });
+  }
+
+  let ticketStatus = ticket.status;
+  if (ticket.status === 'Resolved') {
+    const closed = await prisma.ticket.updateMany({
+      where: { id: ticket.id, status: 'Resolved' },
+      data: { status: 'Closed', closedAt: new Date() }
+    });
+    if (closed.count) {
+      ticketStatus = 'Closed';
+      await prisma.ticketHistory.create({
+        data: {
+          ticketId: ticket.id,
+          field: 'status',
+          oldValue: 'Resolved',
+          newValue: 'Closed',
+          changedBy: userId || 'Requester (CSAT)'
+        }
+      });
+    }
+  }
+
+  return { response, alreadyRecorded, ticketStatus };
+}
+
+function parseRating(value) {
+  const rating = Number(value);
+  return Number.isInteger(rating) && rating >= 1 && rating <= 5 ? rating : null;
+}
+
 exports.createCsatResponse = async (req, res) => {
   try {
-    const { ticketId, rating, comment } = req.body;
-    const numericRating = Number(rating);
-    if (!ticketId || !Number.isInteger(numericRating) || numericRating < 1 || numericRating > 5) {
+    const { ticketId, comment } = req.body || {};
+    const numericRating = parseRating(req.body?.rating);
+    if (typeof ticketId !== 'string' || !ticketId || !numericRating) {
       return res.status(400).json({ success: false, message: 'Ticket and rating from 1 to 5 are required' });
     }
     if (comment != null && typeof comment !== 'string') {
@@ -398,31 +511,19 @@ exports.createCsatResponse = async (req, res) => {
     }
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },
-      select: { id: true, status: true }
+      select: { id: true, status: true, requesterEmail: true }
     });
     if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found' });
+    // Satisfaction must come from the person who raised the ticket, not from staff.
+    if (ticket.requesterEmail.toLowerCase() !== String(req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ success: false, message: 'Only the ticket requester can rate this ticket' });
+    }
     if (!RESOLVED_STATUSES.has(ticket.status)) {
       return res.status(400).json({ success: false, message: 'Feedback is available after a ticket is resolved' });
     }
 
-    const existing = await prisma.csatResponse.findFirst({
-      where: { ticketId },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, rating: true, comment: true, createdAt: true }
-    });
-    if (existing) {
-      return res.status(200).json({ success: true, message: 'Feedback already recorded for this ticket', response: existing });
-    }
-
-    const response = await prisma.csatResponse.create({
-      data: {
-        ticketId,
-        rating: numericRating,
-        comment: comment?.trim().slice(0, 2000) || null,
-        userId: req.user?.id || null
-      }
-    });
-    res.status(200).json({ success: true, response });
+    const result = await recordRequesterCsat({ ticket, rating: numericRating, comment, userId: req.user.id });
+    res.status(200).json({ success: true, response: result.response, ticketStatus: result.ticketStatus });
   } catch (error) {
     console.error('Create CSAT response error:', error);
     res.status(500).json({ success: false, message: 'Failed to save CSAT response' });
@@ -493,53 +594,22 @@ exports.createPublicCsatResponse = async (req, res) => {
       return res.status(409).json({ success: false, message: 'This ticket is no longer resolved and cannot receive feedback' });
     }
 
-    const existing = await prisma.csatResponse.findFirst({
-      where: { ticketId: ticket.id },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, rating: true, comment: true, createdAt: true }
-    });
-    if (existing) {
-      return res.status(200).json({ success: true, message: 'Feedback already recorded for this ticket', response: existing, ticketStatus: ticket.status });
-    }
-
     const requester = await prisma.user.findUnique({
       where: { email: ticket.requesterEmail },
       select: { id: true }
     });
-    const response = await prisma.csatResponse.create({
-      data: {
-        ticketId: ticket.id,
-        rating: payload.rating,
-        comment: comment?.trim().slice(0, 2000) || null,
-        userId: requester?.id || null
-      }
+    const result = await recordRequesterCsat({
+      ticket,
+      rating: payload.rating,
+      comment,
+      userId: requester?.id || null
     });
 
-    // Automatically transition ticket status from 'Resolved' to 'Closed'
-    await prisma.ticket.update({
-      where: { id: ticket.id },
-      data: {
-        status: 'Closed',
-        closedAt: new Date()
-      }
-    });
-
-    // Record in TicketHistory audit log
-    await prisma.ticketHistory.create({
-      data: {
-        ticketId: ticket.id,
-        field: 'status',
-        oldValue: ticket.status,
-        newValue: 'Closed',
-        changedBy: requester?.id || 'Requester (CSAT)'
-      }
-    });
-
-    res.status(200).json({ 
-      success: true, 
-      message: 'Ticket closed and feedback recorded.', 
-      response, 
-      ticketStatus: 'Closed' 
+    res.status(200).json({
+      success: true,
+      message: result.alreadyRecorded ? 'Feedback already recorded for this ticket' : 'Ticket closed and feedback recorded.',
+      response: result.response,
+      ticketStatus: result.ticketStatus
     });
   } catch (error) {
     console.error('Create public CSAT response error:', error);
@@ -547,44 +617,47 @@ exports.createPublicCsatResponse = async (req, res) => {
   }
 };
 
-exports.handleEmailCsatRate = async (req, res) => {
-  try {
-    const { ticketId, rating } = req.query;
-    const numericRating = Number(rating);
-    if (!ticketId || !Number.isInteger(numericRating) || numericRating < 1 || numericRating > 5) {
-      return res.status(400).send('<h2>Invalid rating request</h2>');
-    }
-
-    const ticket = await prisma.ticket.findUnique({
-      where: { id: ticketId },
-      select: { id: true, ticketNumber: true, requesterEmail: true, status: true }
-    });
-    if (!ticket) return res.status(404).send('<h2>Ticket not found</h2>');
-    if (!RESOLVED_STATUSES.has(ticket.status)) {
-      return res.status(409).send('<h2>Feedback is available after a ticket is resolved</h2>');
-    }
-
-    const feedbackLink = createCsatLinks(ticket).find(link => link.rating === numericRating);
-    if (!feedbackLink) throw new Error('Unable to generate a CSAT link for the selected rating');
-    res.redirect(303, feedbackLink.url);
-  } catch (error) {
-    console.error('Handle email CSAT rate error:', error);
-    res.status(500).send('<h2>Failed to record rating</h2>');
-  }
+// Legacy unsigned rating links (/csat/rate?ticketId=..&rating=..) used to be exchanged here
+// for a signed feedback token. Because the signed token also closes the ticket, minting one
+// for anyone who knows a ticket ID defeated the signature, so the exchange is retired.
+// Current emails always carry signed links (see csatService.ensureWorkingCsatLinks).
+exports.handleEmailCsatRate = (req, res) => {
+  res.status(410)
+    .type('html')
+    .send(
+      '<!doctype html><meta charset="utf-8"><title>Feedback link expired</title>' +
+      '<div style="font-family:Arial,sans-serif;max-width:520px;margin:48px auto;padding:24px;border:1px solid #e4e4e7;border-radius:8px">' +
+      '<h2 style="margin-top:0">This feedback link is no longer valid</h2>' +
+      '<p>Please use the rating buttons in the most recent resolution email for your ticket, ' +
+      'or reply to that email to share your feedback with ICT Support.</p></div>'
+    );
 };
+
+exports.recordRequesterCsat = recordRequesterCsat;
 
 exports.getDashboardAnalytics = async (req, res) => {
   try {
     const { departmentId, agentId, from, to } = req.query;
+    if ([departmentId, agentId, from, to].some(value => value !== undefined && typeof value !== 'string')) {
+      return res.status(400).json({ success: false, message: 'Invalid dashboard filter' });
+    }
     const createdAt = {};
-    if (from) createdAt.gte = new Date(from);
-    if (to) createdAt.lte = new Date(to);
+    for (const [key, value] of [['gte', from], ['lte', to]]) {
+      if (!value) continue;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return res.status(400).json({ success: false, message: `Invalid ${key === 'gte' ? 'from' : 'to'} date` });
+      }
+      createdAt[key] = date;
+    }
 
     const ticketWhere = {
       ...(Object.keys(createdAt).length ? { createdAt } : {}),
       ...(departmentId ? { departmentId } : {}),
       ...(agentId ? { assignedToId: agentId } : {})
     };
+    // CSAT figures follow the same filters as the ticket figures.
+    const csatWhere = Object.keys(ticketWhere).length ? { ticket: ticketWhere } : {};
 
     const [
       total, open, inProgress, onHold, resolved, closed,
@@ -596,9 +669,10 @@ exports.getDashboardAnalytics = async (req, res) => {
       prisma.ticket.count({ where: { ...ticketWhere, status: 'OnHold' } }),
       prisma.ticket.count({ where: { ...ticketWhere, status: 'Resolved' } }),
       prisma.ticket.count({ where: { ...ticketWhere, status: 'Closed' } }),
-      prisma.csatResponse.aggregate({ _avg: { rating: true }, _count: { rating: true } }),
-      prisma.csatResponse.count({ where: { rating: { gte: CSAT_SATISFIED_MIN_RATING } } }),
+      prisma.csatResponse.aggregate({ where: csatWhere, _avg: { rating: true }, _count: { rating: true } }),
+      prisma.csatResponse.count({ where: { ...csatWhere, rating: { gte: CSAT_SATISFIED_MIN_RATING } } }),
       prisma.csatResponse.findMany({
+        where: csatWhere,
         select: { ticketId: true },
         distinct: ['ticketId']
       }),
@@ -612,7 +686,8 @@ exports.getDashboardAnalytics = async (req, res) => {
         take: 1000
       }),
       prisma.user.findMany({
-        include: { department: true },
+        where: { role: { in: ['staff', 'admin'] } },
+        select: { id: true, name: true, role: true, department: { select: { name: true } } },
         orderBy: { name: 'asc' }
       }),
       prisma.ticket.groupBy({

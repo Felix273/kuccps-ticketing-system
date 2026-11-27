@@ -14,21 +14,18 @@ const {
   isActiveTicketOverdue
 } = require('../services/slaService');
 const prisma = require('../lib/prisma');
-function normalizePriority(value) {
-  if (!value) return null;
-  const cleaned = String(value).replace(/\s+/g, '').toLowerCase();
-  const map = {
-    veryhigh: 'VeryHigh',
-    high: 'High',
-    medium: 'Medium',
-    low: 'Low',
-    verylow: 'VeryLow',
-    critical: 'VeryHigh',
-    normal: 'Medium',
-    urgent: 'High'
-  };
-  return map[cleaned] || null;
-}
+const { normalizePriority, normalizeStatus } = require('../services/ticketEnums');
+const { createTicketWithNumber } = require('../services/ticketNumber');
+const {
+  ACTIVE_STATUSES,
+  MAX_EXPORT_ROWS,
+  SEGMENTS,
+  TicketQueryError,
+  URGENT_PRIORITIES,
+  combineWhere,
+  parseTicketQuery,
+  segmentWhere
+} = require('../services/ticketQuery');
 
 function decorateTicket(ticket) {
   if (!ticket) return ticket;
@@ -60,26 +57,13 @@ function cleanFilename(value) {
     .slice(0, 180) || 'attachment';
 }
 
-async function generateTicketNumber() {
-  const settings = await prisma.systemSettings.findFirst();
-  const date = new Date();
-  const dateStr = date.getFullYear().toString() +
-    String(date.getMonth() + 1).padStart(2, '0') +
-    String(date.getDate()).padStart(2, '0');
-  const todayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
-  const count = await prisma.ticket.count({
-    where: { createdAt: { gte: todayStart, lt: todayEnd } }
-  });
-
-  // Use dynamic prefix from settings
-  const prefix = settings ? settings.ticketNumberPrefix : 'TICK';
-  return `${prefix}-${dateStr}-${String(count + 1).padStart(4, '0')}`;
-}
-
 exports.createTicket = async (req, res) => {
   try {
-    const { subject, description, requesterEmail, senderEmail, senderName, departmentId, category, priority } = req.body;
+    const { subject, description, requesterEmail, senderEmail, senderName, departmentId, category, priority } = req.body || {};
+    if ([subject, description, requesterEmail, senderEmail, senderName, departmentId, category, priority]
+      .some(value => value != null && typeof value !== 'string')) {
+      return res.status(400).json({ success: false, message: 'Ticket fields must be text' });
+    }
     const email = cleanText(requesterEmail || senderEmail, 254).toLowerCase();
     const name = senderName ? cleanText(senderName, 160) : null;
     const safeSubject = cleanText(subject, 255);
@@ -135,12 +119,11 @@ if (priority && !normalizedPriority) {
 
     // Get system settings for defaults
     const settings = await prisma.systemSettings.findFirst();
-    const ticketNumber = await generateTicketNumber();
     const resolvedPriority = resolvedPriorityInput || normalizePriority(settings ? settings.defaultPriority : null) || 'Medium';
-    const resolvedCategory = category || (settings ? settings.defaultCategory : 'General Issues');
+    const resolvedCategory = cleanText(category, 120) || settings?.defaultCategory || 'General Issues';
     const createdAt = new Date();
     const slaDeadlines = await getConfiguredTicketSlaDeadlines(prisma, resolvedCategory, resolvedPriority, createdAt);
-    const ticket = await prisma.ticket.create({
+    const ticket = await createTicketWithNumber(ticketNumber => prisma.ticket.create({
       data: {
         ticketNumber,
         subject: safeSubject,
@@ -149,7 +132,7 @@ if (priority && !normalizedPriority) {
         requesterName: name,
         category: resolvedCategory,
         priority: resolvedPriority,
-        status: settings ? (settings.defaultStatus || 'Open') : 'Open',
+        status: normalizeStatus(settings?.defaultStatus) || 'Open',
         departmentId: resolvedDepartmentId,
         createdById: createdById,
         createdAt,
@@ -160,8 +143,8 @@ if (priority && !normalizedPriority) {
         slaResolutionTargetPercent: slaDeadlines.slaResolutionTargetPercent,
         slaBreached: false
       },
-      include: { department: true, assignedTo: true, createdBy: true }
-    });
+      include: { department: true }
+    }));
     auditLog('ticket.created', { requestId: req.id, ticketNumber: ticket.ticketNumber, email });
     try {
       const emailResult = await sendEmail(email, 'ticketCreated', ticket);
@@ -196,27 +179,326 @@ if (priority && !normalizedPriority) {
   }
 };
 
+// Google Workspace Add-on: a requester's recent tickets (API-key protected; the add-on
+// supplies the signed-in Gmail user's address from Session.getActiveUser()).
+exports.getRequesterTickets = async (req, res) => {
+  try {
+    const email = typeof req.query.email === 'string' ? cleanText(req.query.email, 254).toLowerCase() : '';
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ success: false, message: 'A valid requester email is required' });
+    }
+    const tickets = await prisma.ticket.findMany({
+      where: { requesterEmail: { equals: email, mode: 'insensitive' } },
+      select: {
+        id: true,
+        ticketNumber: true,
+        subject: true,
+        status: true,
+        priority: true,
+        category: true,
+        createdAt: true,
+        resolvedAt: true,
+        csatResponses: { select: { id: true }, take: 1 }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20
+    });
+    return res.json({
+      success: true,
+      tickets: tickets.map(({ csatResponses, ...ticket }) => ({ ...ticket, csatRated: csatResponses.length > 0 }))
+    });
+  } catch (error) {
+    console.error('Error fetching requester tickets:', { requestId: req.id, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to fetch tickets' });
+  }
+};
+
+// Google Workspace Add-on: requester satisfaction rating for their own resolved ticket.
+exports.submitRequesterCsat = async (req, res) => {
+  try {
+    const { ticketId, comment } = req.body || {};
+    const requesterEmail = typeof req.body?.requesterEmail === 'string' ? req.body.requesterEmail.trim().toLowerCase() : '';
+    const rating = Number(req.body?.rating);
+    if (typeof ticketId !== 'string' || !ticketId || !isValidEmail(requesterEmail) ||
+        !Number.isInteger(rating) || rating < 1 || rating > 5) {
+      return res.status(400).json({ success: false, message: 'Ticket, requester email and a rating from 1 to 5 are required' });
+    }
+    if (comment != null && typeof comment !== 'string') {
+      return res.status(400).json({ success: false, message: 'Comment must be text' });
+    }
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, status: true, requesterEmail: true }
+    });
+    if (!ticket || ticket.requesterEmail.toLowerCase() !== requesterEmail) {
+      return res.status(404).json({ success: false, message: 'Ticket not found for this requester' });
+    }
+    if (!['Resolved', 'Closed'].includes(ticket.status)) {
+      return res.status(409).json({ success: false, message: 'Feedback is available after a ticket is resolved' });
+    }
+    const requester = await prisma.user.findUnique({ where: { email: requesterEmail }, select: { id: true } });
+    const { recordRequesterCsat } = require('./operationsController');
+    const result = await recordRequesterCsat({ ticket, rating, comment, userId: requester?.id || null });
+    return res.json({ success: true, response: result.response, ticketStatus: result.ticketStatus });
+  } catch (error) {
+    console.error('Error recording requester CSAT:', { requestId: req.id, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to save feedback' });
+  }
+};
+
+const TICKET_LIST_INCLUDE = {
+  department: { select: { id: true, name: true, code: true } },
+  assignedTo: { select: { id: true, name: true, email: true, department: { select: { id: true, name: true } } } },
+  createdBy: { select: { id: true, name: true, email: true } },
+  csatResponses: { select: { id: true }, take: 1 },
+  _count: { select: { comments: true } }
+};
+
+function serializeListTicket({ csatResponses, ...ticket }) {
+  return { ...decorateTicket(ticket), csatRated: csatResponses.length > 0 };
+}
+
+function sendQueryError(res, error, fallbackMessage) {
+  if (error instanceof TicketQueryError) {
+    return res.status(400).json({ success: false, message: error.message });
+  }
+  console.error(fallbackMessage, error);
+  return res.status(500).json({ success: false, message: fallbackMessage });
+}
+
+// Paginated, server-filtered ticket list. Segment counts use the same filters
+// (minus the segment) so the tab badges always match what each tab would show.
 exports.getAllTickets = async (req, res) => {
   try {
-    const tickets = await prisma.ticket.findMany({
-      include: { department: true, assignedTo: { select: { id: true, name: true, email: true } }, createdBy: { select: { id: true, name: true, email: true } }, _count: { select: { comments: true } } },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    const ratedTicketIds = new Set(
-      (await prisma.csatResponse.findMany({
-        select: { ticketId: true },
-        distinct: ['ticketId']
-      })).map((r) => r.ticketId)
-    );
+    const query = parseTicketQuery(req.query, req.user);
+    const where = combineWhere(query.baseWhere, segmentWhere(query.segment, req.user.id));
+    const [total, tickets, counts] = await Promise.all([
+      prisma.ticket.count({ where }),
+      prisma.ticket.findMany({
+        where,
+        include: TICKET_LIST_INCLUDE,
+        orderBy: query.orderBy,
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize
+      }),
+      Promise.all(SEGMENTS.map(segment => prisma.ticket.count({
+        where: combineWhere(query.baseWhere, segmentWhere(segment, req.user.id))
+      })))
+    ]);
 
     return res.json({
       success: true,
-      tickets: tickets.map((t) => ({ ...decorateTicket(t), csatRated: ratedTicketIds.has(t.id) }))
+      tickets: tickets.map(serializeListTicket),
+      pagination: {
+        page: query.page,
+        pageSize: query.pageSize,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / query.pageSize))
+      },
+      segmentCounts: Object.fromEntries(SEGMENTS.map((segment, index) => [segment, counts[index]]))
     });
   } catch (error) {
-    console.error('Error fetching tickets:', error);
-    return res.status(500).json({ success: false, message: 'Failed to fetch tickets' });
+    return sendQueryError(res, error, 'Failed to fetch tickets');
+  }
+};
+
+// Same filters as the list, for CSV export; bounded so one request cannot load everything.
+exports.exportTickets = async (req, res) => {
+  try {
+    const query = parseTicketQuery(req.query, req.user);
+    const where = combineWhere(query.baseWhere, segmentWhere(query.segment, req.user.id));
+    const [total, tickets] = await Promise.all([
+      prisma.ticket.count({ where }),
+      prisma.ticket.findMany({
+        where,
+        select: {
+          id: true,
+          ticketNumber: true,
+          subject: true,
+          status: true,
+          priority: true,
+          category: true,
+          requesterEmail: true,
+          createdAt: true,
+          updatedAt: true,
+          resolvedAt: true,
+          department: { select: { name: true } },
+          assignedTo: { select: { name: true, department: { select: { name: true } } } }
+        },
+        orderBy: query.orderBy,
+        take: MAX_EXPORT_ROWS
+      })
+    ]);
+    return res.json({ success: true, tickets, total, truncated: total > tickets.length, limit: MAX_EXPORT_ROWS });
+  } catch (error) {
+    return sendQueryError(res, error, 'Failed to export tickets');
+  }
+};
+
+function dateKeyInTimezone(date) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: process.env.TICKET_TIMEZONE || 'Africa/Nairobi',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+}
+
+// Dashboard aggregates computed in the database (no full ticket download).
+exports.getOverview = async (req, res) => {
+  try {
+    const timeZone = process.env.TICKET_TIMEZONE || 'Africa/Nairobi';
+    const now = new Date();
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(now.getTime() - (6 - index) * 24 * 60 * 60 * 1000);
+      return {
+        key: dateKeyInTimezone(day),
+        date: day.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone }),
+        created: 0,
+        resolved: 0,
+        closed: 0
+      };
+    });
+    const windowStart = new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000);
+
+    const [total, statusGroups, slaCount, csatCount, trendRows, departmentRows, watchlist, staffGroups] = await Promise.all([
+      prisma.ticket.count(),
+      prisma.ticket.groupBy({ by: ['status'], _count: { _all: true } }),
+      prisma.ticket.count({ where: { OR: [{ responseDueAt: { not: null } }, { slaDueAt: { not: null } }] } }),
+      prisma.ticket.count({ where: { csatResponses: { some: {} } } }),
+      prisma.$queryRaw`
+        SELECT 'created' AS metric, to_char("createdAt" AT TIME ZONE 'UTC' AT TIME ZONE ${timeZone}, 'YYYY-MM-DD') AS day, count(*)::int AS count
+          FROM "Ticket" WHERE "createdAt" >= ${windowStart} GROUP BY 2
+        UNION ALL
+        SELECT 'resolved', to_char("resolvedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${timeZone}, 'YYYY-MM-DD'), count(*)::int
+          FROM "Ticket" WHERE "resolvedAt" >= ${windowStart} GROUP BY 2
+        UNION ALL
+        SELECT 'closed', to_char("closedAt" AT TIME ZONE 'UTC' AT TIME ZONE ${timeZone}, 'YYYY-MM-DD'), count(*)::int
+          FROM "Ticket" WHERE "closedAt" >= ${windowStart} GROUP BY 2`,
+      prisma.$queryRaw`
+        SELECT COALESCE(ad.name, td.name) AS name,
+               count(*)::int AS total,
+               count(*) FILTER (WHERE t.status IN ('Resolved', 'Closed'))::int AS resolved
+          FROM "Ticket" t
+          LEFT JOIN "User" u ON u.id = t."assignedToId"
+          LEFT JOIN "Department" ad ON ad.id = u."departmentId"
+          LEFT JOIN "Department" td ON td.id = t."departmentId"
+         WHERE COALESCE(ad.name, td.name) IS NOT NULL
+         GROUP BY 1 ORDER BY total DESC LIMIT 6`,
+      prisma.ticket.findMany({
+        where: { status: { in: ACTIVE_STATUSES } },
+        select: { id: true, ticketNumber: true, subject: true, priority: true, status: true, createdAt: true },
+        orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
+        take: 5
+      }),
+      prisma.ticket.groupBy({
+        by: ['assignedToId', 'status'],
+        where: { assignedToId: { not: null } },
+        _count: { _all: true }
+      })
+    ]);
+
+    const byStatus = Object.fromEntries(['Open', 'InProgress', 'OnHold', 'Resolved', 'Closed'].map(status => [status, 0]));
+    statusGroups.forEach(group => { byStatus[group.status] = group._count._all; });
+
+    const dayIndex = new Map(days.map(day => [day.key, day]));
+    trendRows.forEach(row => {
+      const day = dayIndex.get(row.day);
+      if (day) day[row.metric] = row.count;
+    });
+
+    const staff = new Map();
+    staffGroups.forEach(group => {
+      const entry = staff.get(group.assignedToId) || { userId: group.assignedToId, open: 0, resolved: 0, total: 0 };
+      entry.total += group._count._all;
+      if (['Resolved', 'Closed'].includes(group.status)) entry.resolved += group._count._all;
+      else entry.open += group._count._all;
+      staff.set(group.assignedToId, entry);
+    });
+    const topStaff = [...staff.values()].sort((a, b) => b.resolved - a.resolved).slice(0, 5);
+    const staffNames = await prisma.user.findMany({
+      where: { id: { in: topStaff.map(entry => entry.userId) } },
+      select: { id: true, name: true }
+    });
+    const nameById = new Map(staffNames.map(user => [user.id, user.name]));
+
+    const rate = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
+    return res.json({
+      success: true,
+      overview: {
+        total,
+        byStatus,
+        active: byStatus.Open + byStatus.InProgress + byStatus.OnHold,
+        withSla: slaCount,
+        withCsat: csatCount,
+        trendData: days.map(({ key, ...day }) => day),
+        departments: departmentRows.map(row => ({ ...row, open: row.total - row.resolved, rate: rate(row.resolved, row.total) })),
+        priorityWatchlist: watchlist,
+        staffLeaderboard: topStaff.map(entry => ({
+          ...entry,
+          name: nameById.get(entry.userId) || 'Unknown',
+          rate: rate(entry.resolved, entry.total)
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Error building ticket overview:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load ticket overview' });
+  }
+};
+
+function emptyWorkload() {
+  return { total: 0, open: 0, inProgress: 0, onHold: 0, resolved: 0, closed: 0, critical: 0, unclaimed: 0 };
+}
+
+const STATUS_KEYS = { Open: 'open', InProgress: 'inProgress', OnHold: 'onHold', Resolved: 'resolved', Closed: 'closed' };
+
+// Per-department and per-officer ticket counts for the Departments screen.
+// A department's tickets are those routed to it or assigned to one of its officers.
+exports.getWorkload = async (req, res) => {
+  try {
+    const [departmentRows, userGroups, userCritical] = await Promise.all([
+      prisma.$queryRaw`
+        SELECT d.id AS "departmentId", t.status::text AS status,
+               count(*)::int AS count,
+               count(*) FILTER (WHERE t.priority IN ('VeryHigh', 'Critical') AND t.status IN ('Open', 'InProgress', 'OnHold'))::int AS critical,
+               count(*) FILTER (WHERE t."assignedToId" IS NULL)::int AS unclaimed
+          FROM "Department" d
+          JOIN "Ticket" t ON t."departmentId" = d.id
+            OR t."assignedToId" IN (SELECT u.id FROM "User" u WHERE u."departmentId" = d.id)
+         GROUP BY d.id, t.status`,
+      prisma.ticket.groupBy({ by: ['assignedToId', 'status'], where: { assignedToId: { not: null } }, _count: { _all: true } }),
+      prisma.ticket.groupBy({
+        by: ['assignedToId'],
+        where: { assignedToId: { not: null }, priority: { in: URGENT_PRIORITIES }, status: { in: ACTIVE_STATUSES } },
+        _count: { _all: true }
+      })
+    ]);
+
+    const departments = {};
+    departmentRows.forEach(row => {
+      const entry = departments[row.departmentId] || (departments[row.departmentId] = emptyWorkload());
+      entry.total += row.count;
+      entry[STATUS_KEYS[row.status]] += row.count;
+      entry.critical += row.critical;
+      entry.unclaimed += row.unclaimed;
+    });
+
+    const users = {};
+    userGroups.forEach(group => {
+      const entry = users[group.assignedToId] || (users[group.assignedToId] = emptyWorkload());
+      entry.total += group._count._all;
+      entry[STATUS_KEYS[group.status]] += group._count._all;
+    });
+    userCritical.forEach(group => {
+      (users[group.assignedToId] || (users[group.assignedToId] = emptyWorkload())).critical = group._count._all;
+    });
+
+    const activeTotal = await prisma.ticket.count({ where: { status: { in: ACTIVE_STATUSES } } });
+    return res.json({ success: true, workload: { departments, users, activeTotal } });
+  } catch (error) {
+    console.error('Error building workload:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load workload' });
   }
 };
 
@@ -328,7 +610,16 @@ exports.updateTicket = async (req, res) => {
       updateData.departmentId = departmentId;
       historyEntries.push({ field: 'department', oldValue: existing.departmentId, newValue: departmentId });
     }
-    if (category) updateData.category = category;
+    if (category !== undefined) {
+      const safeCategory = cleanText(category, 120);
+      if (!safeCategory) {
+        return res.status(400).json({ success: false, message: 'Category cannot be empty' });
+      }
+      if (safeCategory !== existing.category) {
+        updateData.category = safeCategory;
+        historyEntries.push({ field: 'category', oldValue: existing.category, newValue: safeCategory });
+      }
+    }
     if ((updateData.status || status) === 'Open') {
       updateData.assignedToId = null;
       if (existing.assignedToId) {
@@ -527,7 +818,7 @@ exports.addComment = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Ticket not found' });
     }
     const comment = await prisma.comment.create({
-      data: { ticketId: id, userId: userId, content: safeContent, isInternal: isInternal || false },
+      data: { ticketId: id, userId: userId, content: safeContent, isInternal: isInternal === true },
       include: { user: { select: { id: true, name: true, email: true, role: true } } }
     });
     if (!comment.isInternal && ['staff', 'admin'].includes(comment.user?.role) && !existingTicket.firstRespondedAt) {
@@ -585,6 +876,14 @@ exports.addAttachment = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Attachment file is required' });
     }
     uploadedPath = req.file.path;
+    const settings = await prisma.systemSettings.findFirst({ select: { maxFileSize: true } });
+    if (settings?.maxFileSize && req.file.size > settings.maxFileSize) {
+      await removeUploadFile(uploadedPath, req.id);
+      return res.status(413).json({
+        success: false,
+        message: `Attachment exceeds the ${Math.round(settings.maxFileSize / (1024 * 1024))} MB limit`
+      });
+    }
     const ticket = await prisma.ticket.findUnique({ where: { id } });
     if (!ticket) {
       await removeUploadFile(uploadedPath, req.id);
@@ -681,7 +980,7 @@ exports.getStatistics = async (req, res) => {
       prisma.ticket.count({ where: { status: 'Resolved' } }),
       prisma.ticket.count({ where: { status: 'Closed' } }),
       prisma.ticket.count({ where: { status: 'OnHold' } }),
-      prisma.ticket.count({ where: { priority: 'Critical', status: { notIn: ['Resolved', 'Closed'] } } }),
+      prisma.ticket.count({ where: { priority: { in: ['VeryHigh', 'Critical'] }, status: { notIn: ['Resolved', 'Closed'] } } }),
       prisma.ticket.count({
         where: {
           status: { in: [...ACTIVE_TICKET_STATUSES] },

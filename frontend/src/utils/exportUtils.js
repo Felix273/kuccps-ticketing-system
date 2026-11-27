@@ -1,10 +1,19 @@
-export const exportToCSV = (tickets, filename = 'tickets.csv') => {
-  if (!tickets || tickets.length === 0) {
-    alert('No tickets to export');
-    return;
-  }
+// CSV export of tickets. Ticket text comes from requesters, so every cell is quoted and
+// values that a spreadsheet would treat as a formula (=, +, -, @, tab, CR) are prefixed
+// with an apostrophe to prevent CSV/formula injection when opened in Excel.
+const FORMULA_PREFIX = /^[=+\-@\t\r]/;
 
-  // Define headers
+export function csvCell(value) {
+  let text = value === null || value === undefined ? '' : String(value);
+  if (FORMULA_PREFIX.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function formatDate(value) {
+  return value ? new Date(value).toLocaleString() : 'N/A';
+}
+
+export function ticketsToCsv(tickets) {
   const headers = [
     'Ticket Number',
     'Subject',
@@ -19,44 +28,46 @@ export const exportToCSV = (tickets, filename = 'tickets.csv') => {
     'Resolved Date'
   ];
 
-  // Map tickets to rows
   const rows = tickets.map(ticket => [
     ticket.ticketNumber,
-    `"${ticket.subject.replace(/"/g, '""')}"`, // Escape quotes
+    ticket.subject,
     ticket.status,
     ticket.priority,
     ticket.category,
     ticket.requesterEmail,
     ticket.assignedTo?.name || 'Unclaimed',
-    ticket.department?.name || ticket.assignedTo?.department || 'N/A',
-    new Date(ticket.createdAt).toLocaleString(),
-    new Date(ticket.updatedAt).toLocaleString(),
-    ticket.resolvedAt ? new Date(ticket.resolvedAt).toLocaleString() : 'N/A'
+    ticket.department?.name || ticket.assignedTo?.department?.name || 'N/A',
+    formatDate(ticket.createdAt),
+    formatDate(ticket.updatedAt),
+    formatDate(ticket.resolvedAt)
   ]);
 
-  // Combine headers and rows
-  const csvContent = [
-    headers.join(','),
-    ...rows.map(row => row.join(','))
-  ].join('\n');
+  return [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n');
+}
 
-  // Create blob and download
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+export const exportToCSV = (tickets, filename = 'tickets.csv') => {
+  if (!tickets || tickets.length === 0) {
+    alert('No tickets to export');
+    return;
+  }
+
+  // Leading BOM so Excel reads UTF-8 (names, accents) correctly.
+  const blob = new Blob(['﻿', ticketsToCsv(tickets)], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
-  
+
   link.setAttribute('href', url);
   link.setAttribute('download', filename);
   link.style.visibility = 'hidden';
-  
+
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
+// Excel opens the CSV directly; it is saved with a .csv extension so Excel does not
+// warn about a mismatched file format.
 export const exportToExcel = (tickets, filename = 'tickets.xlsx') => {
-  // For now, we'll export as CSV with .xlsx extension
-  // In a real app, you'd use a library like xlsx or exceljs
-  exportToCSV(tickets, filename);
-  alert('Note: File is exported as CSV. For true Excel format, consider using the xlsx library.');
+  exportToCSV(tickets, filename.replace(/\.xlsx$/i, '.csv'));
 };

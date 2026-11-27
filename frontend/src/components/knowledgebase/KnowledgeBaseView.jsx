@@ -74,11 +74,13 @@ export const KnowledgeBaseView = () => {
   const isAdmin = currentUser?.role === 'admin';
   const isStaff = currentUser?.role === 'staff' || isAdmin;
 
+  // Initial load only; later reloads are triggered explicitly by search/filter actions.
   useEffect(() => {
     loadArticles();
     if (isAdmin) {
       loadSearchGaps();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
   const loadArticles = async () => {

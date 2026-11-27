@@ -5,6 +5,7 @@ const multer = require('multer');
 const knowledgeBaseController = require('../controllers/knowledgeBaseController');
 const { authenticateToken, requireAdmin, requireStaffOrAdmin } = require('../middleware/auth');
 const { uploadDir } = require('../services/uploadStorage');
+const { rateLimit } = require('../middleware/security');
 
 // Strict file validation for officer uploads
 const upload = multer({
@@ -17,6 +18,7 @@ const upload = multer({
     const allowedTypes = new Set([
       'text/plain',
       'text/markdown',
+      'text/x-markdown',
       'text/csv',
       'application/json',
       'application/pdf',
@@ -27,7 +29,12 @@ const upload = multer({
       'image/webp'
     ]);
     const allowedExtensions = /\.(txt|md|csv|json|log|pdf|doc|docx|png|jpg|jpeg|webp)$/i;
-    if (!allowedTypes.has(file.mimetype) && !allowedExtensions.test(file.originalname)) {
+    // The extension must be allowed AND the declared type must match the allow-list
+    // (browsers report unknown plain-text types such as .md/.log as octet-stream).
+    const name = String(file.originalname || '');
+    const typeAllowed = allowedTypes.has(file.mimetype) ||
+      (file.mimetype === 'application/octet-stream' && /\.(md|log|txt|csv|json)$/i.test(name));
+    if (!allowedExtensions.test(name) || !typeAllowed) {
       return cb(new Error('Invalid file type. Allowed: PDF, DOCX, TXT, MD, CSV, JSON, PNG, JPG'));
     }
     cb(null, true);
@@ -35,9 +42,11 @@ const upload = multer({
 });
 
 // ── PUBLIC & GENERAL READ ROUTES ──────────────────────────────
-router.get('/public/articles', knowledgeBaseController.getArticles);
-router.get('/public/articles/:idOrSlug', knowledgeBaseController.getArticle);
-router.post('/articles/:id/feedback', knowledgeBaseController.submitFeedback);
+const publicReadLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, keyPrefix: 'kb-public-read' });
+const feedbackLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, keyPrefix: 'kb-feedback' });
+router.get('/public/articles', publicReadLimit, knowledgeBaseController.getArticles);
+router.get('/public/articles/:idOrSlug', publicReadLimit, knowledgeBaseController.getArticle);
+router.post('/articles/:id/feedback', feedbackLimit, knowledgeBaseController.submitFeedback);
 
 // ── PROTECTED OFFICER & ADMIN WORKBENCH ───────────────────────
 router.use(authenticateToken);

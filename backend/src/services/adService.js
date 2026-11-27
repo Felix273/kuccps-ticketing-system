@@ -1,7 +1,9 @@
+const crypto = require('crypto');
 const ldap = require('ldapjs');
 const bcrypt = require('bcryptjs');
 
 const prisma = require('../lib/prisma');
+const { decryptSecret } = require('./secretBox');
 
 const DEFAULT_USER_FILTER = '(&(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))';
 const DEFAULT_DIRECTORATE_FILTER = '(|(objectClass=organizationalUnit)(objectClass=group))';
@@ -67,7 +69,7 @@ async function getAdSettings() {
     ldapBaseDn: settings?.ldapBaseDn || process.env.LDAP_BASE_DN,
     ldapUserDnPrefix: settings?.ldapUserDnPrefix || process.env.LDAP_USER_DN_PREFIX || 'sAMAccountName',
     ldapBindDn: settings?.ldapBindDn || process.env.LDAP_BIND_DN,
-    ldapBindPassword: settings?.ldapBindPassword || process.env.LDAP_BIND_PASSWORD,
+    ldapBindPassword: decryptSecret(settings?.ldapBindPassword || null) || process.env.LDAP_BIND_PASSWORD,
     ldapDomain: settings?.ldapDomain || process.env.LDAP_DOMAIN,
     ldapUserSearchBase: settings?.ldapUserSearchBase || process.env.LDAP_USER_SEARCH_BASE || settings?.ldapBaseDn || process.env.LDAP_BASE_DN,
     ldapUserFilter: settings?.ldapUserFilter || process.env.LDAP_USER_FILTER || DEFAULT_USER_FILTER,
@@ -167,17 +169,28 @@ function mapUser(entry, settings) {
   };
 }
 
+// Whole-word ICT department names. Substring matching is unsafe: "ict" occurs in
+// names such as Victor/Benedict and OUs such as "District", which would grant staff access.
+const ICT_DEPARTMENT_PATTERN = /\b(ict|it support|it services|information (and )?communications? technology|information technology)\b/i;
+
+function getOrganizationalUnits(dn) {
+  // Only OU components describe where the account lives; the CN is the person's own name.
+  return String(dn || '')
+    .split(/(?<!\\),/)
+    .map(part => part.trim())
+    .filter(part => /^ou=/i.test(part))
+    .map(part => part.slice(3));
+}
+
 function isIctUser(adUser, settings) {
+  // When an ICT security group is configured it is the single source of truth.
   if (settings.ldapIctGroupDn) {
     const groupDn = settings.ldapIctGroupDn.toLowerCase();
-    if (adUser.memberOf.some(group => String(group).toLowerCase() === groupDn)) return true;
+    return (adUser.memberOf || []).some(group => String(group).toLowerCase() === groupDn);
   }
 
-  const text = `${adUser.department || ''} ${adUser.dn || ''}`.toLowerCase();
-  return text.includes('ict') ||
-    text.includes('information') ||
-    text.includes('technology') ||
-    text.includes('it support');
+  const candidates = [adUser.department, ...getOrganizationalUnits(adUser.dn)].filter(Boolean);
+  return candidates.some(value => ICT_DEPARTMENT_PATTERN.test(String(value)));
 }
 
 async function findAdUser(username, settings) {
@@ -274,7 +287,8 @@ async function upsertAdUser(adUser, settings, forceRole) {
   const department = await ensureDepartment(adUser.department);
   const defaultRole = ['user', 'staff'].includes(settings.ldapDefaultRole) ? settings.ldapDefaultRole : 'user';
   let role = forceRole || (isIctUser(adUser, settings) ? 'staff' : defaultRole);
-  const password = await bcrypt.hash(`AD_SYNC_${adUser.username}_${Date.now()}`, 10);
+  // Unguessable placeholder: directory accounts always authenticate against AD.
+  const password = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
 
   const existing = await prisma.user.findFirst({
     where: {
@@ -301,7 +315,9 @@ async function upsertAdUser(adUser, settings, forceRole) {
     role = existing.role === 'admin' ? 'admin' : role;
     const user = await prisma.user.update({
       where: { id: existing.id },
-      data: { ...data, role },
+      // Accounts created locally (e.g. the bootstrap administrator) stay local so they
+      // remain usable as break-glass accounts if the directory is unavailable.
+      data: { ...data, role, ldapSync: existing.ldapSync },
       include: { department: true }
     });
     await ensureBaseRoleAssignment(user.id, role);
@@ -319,14 +335,26 @@ async function upsertAdUser(adUser, settings, forceRole) {
   return user;
 }
 
+const BASE_ROLE_NAMES = ['admin', 'staff', 'user'];
+
+// Keep the system base role assignment consistent with user.role. Custom roles
+// granted by administrators are left untouched.
 async function ensureBaseRoleAssignment(userId, roleName) {
   const role = await prisma.accessRole.findUnique({ where: { name: roleName } });
   if (!role) return;
-  await prisma.userRole.upsert({
-    where: { userId_roleId: { userId, roleId: role.id } },
-    update: {},
-    create: { userId, roleId: role.id }
-  });
+  await prisma.$transaction([
+    prisma.userRole.deleteMany({
+      where: {
+        userId,
+        role: { name: { in: BASE_ROLE_NAMES.filter(name => name !== roleName) }, isSystem: true }
+      }
+    }),
+    prisma.userRole.upsert({
+      where: { userId_roleId: { userId, roleId: role.id } },
+      update: {},
+      create: { userId, roleId: role.id }
+    })
+  ]);
 }
 
 async function syncDirectorates() {

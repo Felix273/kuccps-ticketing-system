@@ -6,14 +6,17 @@ const {
   requirePermission
 } = require('../services/accessControlService');
 const prisma = require('../lib/prisma');
+const { getRequestToken, isCsrfSafe } = require('./sessionCookie');
 
 const authenticateToken = (req, res, next) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    const { token, source } = getRequestToken(req);
 
     if (!token) {
       return res.status(401).json({ success: false, message: 'Access token required' });
+    }
+    if (!isCsrfSafe(req, source)) {
+      return res.status(403).json({ success: false, message: 'Missing anti-forgery header' });
     }
 
     if (!process.env.JWT_SECRET) {
@@ -21,7 +24,7 @@ const authenticateToken = (req, res, next) => {
       return res.status(500).json({ success: false, message: 'Server configuration error' });
     }
 
-    jwt.verify(token, process.env.JWT_SECRET, async (err, tokenUser) => {
+    jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] }, async (err, tokenUser) => {
       if (err) {
         console.error('JWT verification failed:', err.message);
         if (err.name === 'TokenExpiredError') {
@@ -35,12 +38,19 @@ const authenticateToken = (req, res, next) => {
       try {
         const currentUser = await prisma.user.findUnique({
           where: { id: tokenUser.id },
-          select: { id: true, email: true, username: true, role: true }
+          select: { id: true, email: true, username: true, name: true, role: true, tokensRevokedAt: true }
         });
         if (!currentUser) {
           return res.status(401).json({ success: false, message: 'User account is unavailable' });
         }
-        req.user = { ...tokenUser, ...currentUser };
+        // Tokens issued before the user's last logout/revocation are no longer valid.
+        // JWT iat has second precision, so compare at second granularity.
+        if (currentUser.tokensRevokedAt &&
+            (tokenUser.iat || 0) < Math.floor(currentUser.tokensRevokedAt.getTime() / 1000)) {
+          return res.status(401).json({ success: false, message: 'Session has ended. Please login again.' });
+        }
+        const { tokensRevokedAt, ...activeUser } = currentUser;
+        req.user = { ...tokenUser, ...activeUser };
         next();
       } catch (error) {
         console.error('Authentication user lookup error:', error);

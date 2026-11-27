@@ -41,7 +41,6 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
   const [activeTab, setActiveTab] = useState('details');
   const [replyText, setReplyText] = useState('');
   const [isInternal, setIsInternal] = useState(false);
-  const [collapsedThreads, setCollapsedThreads] = useState({});
   const fileInputRef = useRef(null);
   const [isSending, setIsSending] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -331,7 +330,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
 
                   <span className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold px-2 py-0.5 rounded border border-zinc-200 bg-zinc-50 text-zinc-700">
                     <span className={`w-1.5 h-1.5 rounded-full ${
-                      ticket.priority === 'Critical' || ticket.priority === 'Very High' ? 'bg-rose-500 animate-pulse' :
+                      ticket.priority === 'Critical' || ticket.priority === 'VeryHigh' ? 'bg-rose-500 animate-pulse' :
                       ticket.priority === 'High' ? 'bg-amber-500' : 'bg-zinc-400'
                     }`}></span>
                     {ticket.priority || 'Normal'}

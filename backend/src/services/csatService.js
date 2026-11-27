@@ -5,20 +5,33 @@ const TOKEN_AUDIENCE = 'kuccps-csat';
 const CSAT_SATISFIED_MIN_RATING = 4;
 
 function calculateSatisfactionRate(totalResponses, satisfiedCount) {
-  if (!totalResponses || totalResponses === 0) return null;
+  if (!Number.isInteger(totalResponses) || !Number.isInteger(satisfiedCount)) {
+    throw new TypeError('CSAT response counts must be integers');
+  }
+  if (satisfiedCount < 0 || satisfiedCount > totalResponses) {
+    throw new RangeError('Satisfied responses must be between zero and total responses');
+  }
+  if (totalResponses === 0) return null;
   return Math.round((satisfiedCount / totalResponses) * 100);
 }
 
 function getPublicAppUrl() {
   const configuredUrl = process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'http://localhost:5173';
+  let appUrl;
   try {
-    const appUrl = new URL(configuredUrl.split(',')[0].trim());
-    appUrl.search = '';
-    appUrl.hash = '';
-    return appUrl.toString().replace(/\/$/, '');
+    appUrl = new URL(configuredUrl.split(',')[0].trim());
   } catch {
     return 'http://localhost:5173';
   }
+  if (
+    process.env.NODE_ENV === 'production' &&
+    ['localhost', '127.0.0.1', '[::1]', '::1'].includes(appUrl.hostname)
+  ) {
+    throw new Error('PUBLIC_APP_URL must be a publicly reachable frontend URL in production');
+  }
+  appUrl.search = '';
+  appUrl.hash = '';
+  return appUrl.toString().replace(/\/$/, '');
 }
 
 function signCsatToken(ticket, rating) {
@@ -133,6 +146,19 @@ function removeLegacyCsatSection(html) {
 }
 
 function ensureWorkingCsatLinks(html, ticket, primaryColor) {
+  // Rewrite legacy unsigned rating links (/api/operations/csat/rate?...) to signed links.
+  const signedUrls = new Map(createCsatLinks(ticket).map(link => [link.rating, link.url]));
+  const withSignedAnchors = html.replace(
+    /<a\b[^>]*href="[^"]*\/api\/operations\/csat\/rate\?[^"]*"[^>]*>[\s\S]*?<\/a>/gi,
+    anchor => {
+      const ratingMatch = anchor.match(/[?&]rating=([1-5])\b/i) || anchor.match(/\b([1-5])\s+Stars?\b/i);
+      const inner = anchor.replace(/^<a\b[^>]*>/i, '').replace(/<\/a>\s*$/i, '');
+      if (!ratingMatch || !inner) return '';
+      return `<a href="${signedUrls.get(Number(ratingMatch[1]))}">${inner}</a>`;
+    }
+  );
+  if (withSignedAnchors !== html) return withSignedAnchors.replace('{{csatLinks}}', '');
+
   // Replace existing token or append rendered buttons
   if (html.includes('{{csatLinks}}')) {
     return html.replace('{{csatLinks}}', renderCsatLinks(ticket, primaryColor));

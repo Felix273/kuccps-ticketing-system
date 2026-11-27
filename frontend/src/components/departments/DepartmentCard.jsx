@@ -1,7 +1,9 @@
 import React from 'react';
 import { Building2, Users, Ticket, ArrowUpRight } from 'lucide-react';
 
-export const DepartmentCard = ({ department, tickets = [], users = [], onViewDetails }) => {
+// `stats` comes from GET /tickets/workload (tickets routed to the directorate or
+// assigned to one of its officers).
+export const DepartmentCard = ({ department, stats, users = [], onViewDetails }) => {
   const deptUsers = users.filter(u =>
     u.departmentId === department.id ||
     u.department?.id === department.id ||
@@ -9,22 +11,17 @@ export const DepartmentCard = ({ department, tickets = [], users = [], onViewDet
     u.department === department.name
   );
 
-  const deptTickets = tickets.filter(t => 
-    t.department?.name === department.name || 
-    t.departmentId === department.id ||
-    deptUsers.some(u => u.id === t.assignedToId)
-  );
-
-  const ticketCount = department._count?.tickets || deptTickets.length;
+  const totals = stats || { total: 0, open: 0, inProgress: 0, resolved: 0, closed: 0, critical: 0 };
+  const ticketCount = totals.total;
   const userCount = department._count?.users || deptUsers.length;
 
-  const openTickets = deptTickets.filter(t => t.status === 'Open').length;
-  const inProgressTickets = deptTickets.filter(t => t.status === 'InProgress').length;
-  const resolvedTickets = deptTickets.filter(t => t.status === 'Resolved' || t.status === 'Closed').length;
-  const criticalTickets = deptTickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved' && t.status !== 'Closed').length;
+  const openTickets = totals.open;
+  const inProgressTickets = totals.inProgress;
+  const resolvedTickets = totals.resolved + totals.closed;
+  const criticalTickets = totals.critical;
 
-  const resolutionRate = deptTickets.length > 0 
-    ? Math.round((resolvedTickets / deptTickets.length) * 100) 
+  const resolutionRate = ticketCount > 0
+    ? Math.round((resolvedTickets / ticketCount) * 100)
     : 0;
 
   return (

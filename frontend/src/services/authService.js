@@ -1,40 +1,50 @@
 import { api } from './api';
 
+// Only the non-secret user profile is kept in localStorage (for the UI shell).
+// The session itself is an httpOnly cookie managed by the API.
 export const authService = {
   async login(username, password) {
     const data = await api.post('/auth/login', { username, password });
 
     if (data.success) {
-      localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
     }
 
     return data;
   },
 
-  async validateToken() {
+  // Confirms the cookie session with the server and refreshes the cached profile.
+  async validateSession() {
     try {
-      const token = localStorage.getItem('token');
-      if (!token) return { success: false };
-
       const response = await api.get('/auth/profile');
-      return { success: response.success };
+      if (response.success && response.user) {
+        localStorage.setItem('user', JSON.stringify(response.user));
+        return { success: true, user: response.user };
+      }
+      return { success: false };
     } catch {
       return { success: false };
     }
   },
 
   logout() {
-    localStorage.removeItem('token');
+    // Revoke the session server-side and clear the cookie (best effort).
+    api.post('/auth/logout', {}).catch(() => {});
     localStorage.removeItem('user');
+    // Remove any token left by older versions of the app.
+    localStorage.removeItem('token');
   },
 
   getCurrentUser() {
-    const userStr = localStorage.getItem('user');
-    return userStr ? JSON.parse(userStr) : null;
+    try {
+      const userStr = localStorage.getItem('user');
+      return userStr ? JSON.parse(userStr) : null;
+    } catch {
+      return null;
+    }
   },
 
   isAuthenticated() {
-    return !!localStorage.getItem('token');
+    return Boolean(localStorage.getItem('user'));
   }
 };

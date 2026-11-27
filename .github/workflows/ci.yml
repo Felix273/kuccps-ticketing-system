@@ -17,6 +17,10 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
         working-directory: backend
+      - run: npx prisma validate
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
       - run: npm run typecheck
         working-directory: backend
       - run: npm test
@@ -33,7 +37,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
         working-directory: frontend
-      - run: npx eslint src/components/auth/LoginPage.jsx src/services/ticketService.js src/components/tickets/TicketDetailModal.jsx vite.config.js
+      - run: npx eslint .
         working-directory: frontend
       - run: npm run build
         working-directory: frontend

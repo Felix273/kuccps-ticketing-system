@@ -13,7 +13,11 @@ function sweepExpiredRateLimitBuckets(now) {
 }
 
 function requestId(req, res, next) {
-  req.id = req.headers['x-request-id'] || crypto.randomUUID();
+  // Accept a caller-supplied ID only if it is short and log-safe.
+  const supplied = req.headers['x-request-id'];
+  req.id = typeof supplied === 'string' && /^[A-Za-z0-9._:-]{1,64}$/.test(supplied)
+    ? supplied
+    : crypto.randomUUID();
   res.setHeader('X-Request-Id', req.id);
   next();
 }
@@ -35,47 +39,79 @@ function getClientIp(req) {
   return req.ip || req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
 }
 
-function rateLimit({ windowMs, max, keyPrefix, message }) {
-  return (req, res, next) => {
-    const now = Date.now();
-    sweepExpiredRateLimitBuckets(now);
-    const ip = getClientIp(req);
-    const key = `${keyPrefix}:${ip}`;
-    let bucket = memoryBuckets.get(key);
+// In-process counter. Used when RATE_LIMIT_STORE=memory, in unit tests, and as a
+// fallback if the shared database store is temporarily unavailable.
+function memoryHit(key, windowMs) {
+  const now = Date.now();
+  sweepExpiredRateLimitBuckets(now);
+  let bucket = memoryBuckets.get(key);
+  if (!bucket) {
+    if (memoryBuckets.size >= MAX_RATE_LIMIT_BUCKETS) return { count: Infinity, resetAt: now + windowMs };
+    bucket = { count: 0, resetAt: now + windowMs };
+    memoryBuckets.set(key, bucket);
+  }
+  if (bucket.resetAt <= now) {
+    bucket.count = 0;
+    bucket.resetAt = now + windowMs;
+  }
+  bucket.count += 1;
+  return { count: bucket.count, resetAt: bucket.resetAt };
+}
 
-    if (!bucket) {
-      if (memoryBuckets.size >= MAX_RATE_LIMIT_BUCKETS) {
-        res.setHeader('RateLimit-Limit', String(max));
-        res.setHeader('RateLimit-Remaining', '0');
-        res.setHeader('RateLimit-Reset', String(Math.ceil((now + windowMs) / 1000)));
-        return res.status(429).json({
-          success: false,
-          message: message || 'Too many requests. Please try again later.'
-        });
-      }
-      bucket = { count: 0, resetAt: now + windowMs };
-      memoryBuckets.set(key, bucket);
-    }
+let nextDatabaseSweep = 0;
 
-    if (bucket.resetAt <= now) {
-      bucket.count = 0;
-      bucket.resetAt = now + windowMs;
-    }
+// Shared counter in PostgreSQL: one atomic upsert per request, timed by the database
+// clock, so every backend instance enforces the same limit.
+async function databaseHit(client, key, windowMs) {
+  const rows = await client.$queryRaw`
+    INSERT INTO "RateLimitBucket" ("key", "count", "resetAt")
+    VALUES (${key}, 1, now() + make_interval(secs => ${windowMs / 1000}))
+    ON CONFLICT ("key") DO UPDATE SET
+      "count" = CASE WHEN "RateLimitBucket"."resetAt" <= now() THEN 1 ELSE "RateLimitBucket"."count" + 1 END,
+      "resetAt" = CASE WHEN "RateLimitBucket"."resetAt" <= now()
+        THEN now() + make_interval(secs => ${windowMs / 1000}) ELSE "RateLimitBucket"."resetAt" END
+    RETURNING "count", "resetAt"`;
+  const now = Date.now();
+  if (now >= nextDatabaseSweep) {
+    nextDatabaseSweep = now + RATE_LIMIT_BUCKET_SWEEP_INTERVAL_MS;
+    client.$executeRaw`DELETE FROM "RateLimitBucket" WHERE "resetAt" < now() - interval '1 hour'`
+      .catch(error => console.warn('Rate-limit cleanup skipped:', error.message));
+  }
+  return { count: Number(rows[0].count), resetAt: new Date(rows[0].resetAt).getTime() };
+}
 
-    bucket.count += 1;
+/**
+ * @param {object} options
+ * @param {'database'|'memory'} [options.store] defaults to RATE_LIMIT_STORE or 'database'
+ * @param {object} [options.client] Prisma client for the database store (defaults to the app client)
+ */
+function rateLimit({ windowMs, max, keyPrefix, message, store, client }) {
+  const storeName = store || process.env.RATE_LIMIT_STORE || 'database';
 
+  function respond(req, res, next, { count, resetAt }) {
     res.setHeader('RateLimit-Limit', String(max));
-    res.setHeader('RateLimit-Remaining', String(Math.max(0, max - bucket.count)));
-    res.setHeader('RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)));
-
-    if (bucket.count > max) {
+    res.setHeader('RateLimit-Remaining', String(Math.max(0, max - count)));
+    res.setHeader('RateLimit-Reset', String(Math.ceil(resetAt / 1000)));
+    if (count > max) {
       return res.status(429).json({
         success: false,
         message: message || 'Too many requests. Please try again later.'
       });
     }
+    return next();
+  }
 
-    next();
+  return (req, res, next) => {
+    const key = `${keyPrefix}:${getClientIp(req)}`;
+    if (storeName === 'memory') return respond(req, res, next, memoryHit(key, windowMs));
+
+    const prismaClient = client || require('../lib/prisma');
+    return databaseHit(prismaClient, key, windowMs)
+      .catch(error => {
+        console.warn('Shared rate limit unavailable, using in-process limit:', error.message);
+        return memoryHit(key, windowMs);
+      })
+      .then(result => respond(req, res, next, result));
   };
 }
 
@@ -154,6 +190,10 @@ function getProductionConfigErrors(env = process.env) {
     failures.push('PUBLIC_TICKET_API_KEY must be a high-entropy random value of at least 32 characters in production.');
   }
   if (env.REQUIRE_PUBLIC_TICKET_API_KEY !== 'true') failures.push('REQUIRE_PUBLIC_TICKET_API_KEY must be true in production.');
+  const encryptionKey = cleanSecret(env.SETTINGS_ENCRYPTION_KEY);
+  if (!/^[0-9a-f]{64}$/i.test(encryptionKey) && Buffer.from(encryptionKey, 'base64').length !== 32) {
+    failures.push('SETTINGS_ENCRYPTION_KEY must be 32 random bytes (64 hex characters) in production.');
+  }
   if (!origins.length) {
     failures.push('CORS_ORIGINS/FRONTEND_URL must contain at least one production HTTPS origin.');
   } else {

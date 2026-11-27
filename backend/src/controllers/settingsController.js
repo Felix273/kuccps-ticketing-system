@@ -2,6 +2,8 @@ const { clearSettingsCache } = require('../services/emailService');
 const { SETTINGS_FIELD_SECTIONS } = require('../services/accessControlService');
 const { parseDelimitedValues } = require('../services/normalizedValues');
 const { getDefaultAllowedFileTypesRelation } = require('../services/systemSettingsDefaults');
+const { validateSettingsUpdate } = require('../services/settingsValidation');
+const { encryptSecret } = require('../services/secretBox');
 
 const prisma = require('../lib/prisma');
 
@@ -31,11 +33,11 @@ function getInitialEmailSettings() {
     smtpPort: parseInt(process.env.SMTP_PORT || process.env.EMAIL_SMTP_PORT, 10) || 587,
     smtpSecure: String(process.env.SMTP_SECURE || process.env.EMAIL_SMTP_SECURE || '').toLowerCase() === 'true',
     smtpUser: process.env.SMTP_USER || process.env.EMAIL_USER || null,
-    smtpPassword: process.env.SMTP_PASSWORD || process.env.EMAIL_PASSWORD || null,
+    smtpPassword: encryptSecret(process.env.SMTP_PASSWORD || process.env.EMAIL_PASSWORD || null),
     imapHost: process.env.IMAP_HOST || 'imap.gmail.com',
     imapPort: parseInt(process.env.IMAP_PORT, 10) || 993,
     imapUser: process.env.IMAP_USER || process.env.EMAIL_USER || null,
-    imapPassword: process.env.IMAP_PASSWORD || null,
+    imapPassword: encryptSecret(process.env.IMAP_PASSWORD || null),
     imapEnabled: String(process.env.IMAP_ENABLED || '').toLowerCase() === 'true',
     imapPollInterval: parseInt(process.env.EMAIL_POLL_INTERVAL || process.env.IMAP_POLL_INTERVAL, 10) || 5,
     ldapEnabled: String(process.env.LDAP_ENABLED || process.env.USE_LDAP_AUTH || '').toLowerCase() === 'true',
@@ -43,7 +45,7 @@ function getInitialEmailSettings() {
     ldapBaseDn: process.env.LDAP_BASE_DN || null,
     ldapUserDnPrefix: process.env.LDAP_USER_DN_PREFIX || 'sAMAccountName',
     ldapBindDn: process.env.LDAP_BIND_DN || null,
-    ldapBindPassword: process.env.LDAP_BIND_PASSWORD || null,
+    ldapBindPassword: encryptSecret(process.env.LDAP_BIND_PASSWORD || null),
     ldapDomain: process.env.LDAP_DOMAIN || null,
     ldapUserSearchBase: process.env.LDAP_USER_SEARCH_BASE || process.env.LDAP_BASE_DN || null,
     ldapUserFilter: process.env.LDAP_USER_FILTER || '(&(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))',
@@ -85,6 +87,10 @@ exports.getSettings = async (req, res) => {
 
 exports.updateSettings = async (req, res) => {
   try {
+    const { data: validated, errors } = validateSettingsUpdate(req.body);
+    if (errors.length) {
+      return res.status(400).json({ success: false, message: errors.join('; '), errors });
+    }
     const {
       organizationName,
       organizationCode,
@@ -141,7 +147,7 @@ exports.updateSettings = async (req, res) => {
       maintenanceMessage,
       darkModeEnabled,
       contrastMode
-    } = req.body;
+    } = validated;
 
     let settings = await prisma.systemSettings.findFirst({
       include: { allowedFileTypes: true }
@@ -170,14 +176,14 @@ exports.updateSettings = async (req, res) => {
     if (smtpUser !== undefined) updateData.smtpUser = smtpUser;
     const nextSmtpPassword = _newSmtpPassword || smtpPassword;
     if (nextSmtpPassword !== undefined && nextSmtpPassword !== '' && nextSmtpPassword !== '********') {
-      updateData.smtpPassword = nextSmtpPassword;
+      updateData.smtpPassword = encryptSecret(nextSmtpPassword);
     }
     if (imapHost !== undefined) updateData.imapHost = imapHost;
     if (imapPort !== undefined) updateData.imapPort = imapPort;
     if (imapUser !== undefined) updateData.imapUser = imapUser;
     const nextImapPassword = _newImapPassword || imapPassword;
     if (nextImapPassword !== undefined && nextImapPassword !== '' && nextImapPassword !== '********') {
-      updateData.imapPassword = nextImapPassword;
+      updateData.imapPassword = encryptSecret(nextImapPassword);
     }
     if (imapEnabled !== undefined) updateData.imapEnabled = imapEnabled;
     if (imapPollInterval !== undefined) updateData.imapPollInterval = imapPollInterval;
@@ -188,7 +194,7 @@ exports.updateSettings = async (req, res) => {
     if (ldapBindDn !== undefined) updateData.ldapBindDn = ldapBindDn;
     const nextLdapBindPassword = _newLdapBindPassword || ldapBindPassword;
     if (nextLdapBindPassword !== undefined && nextLdapBindPassword !== '' && nextLdapBindPassword !== '********') {
-      updateData.ldapBindPassword = nextLdapBindPassword;
+      updateData.ldapBindPassword = encryptSecret(nextLdapBindPassword);
     }
     if (ldapDomain !== undefined) updateData.ldapDomain = ldapDomain;
     if (ldapUserSearchBase !== undefined) updateData.ldapUserSearchBase = ldapUserSearchBase;
@@ -317,9 +323,26 @@ exports.getEmailTemplate = async (req, res) => {
   }
 };
 
+const EMAIL_TEMPLATE_TYPES = new Set(['ticketCreated', 'ticketUpdated', 'ticketResolved']);
+
+function getTemplateValidationError({ subject, html }) {
+  if (typeof subject !== 'string' || !subject.trim() || subject.length > 255) {
+    return 'Template subject is required (max 255 characters)';
+  }
+  if (typeof html !== 'string' || !html.trim() || html.length > 200000) {
+    return 'Template HTML is required (max 200,000 characters)';
+  }
+  return null;
+}
+
 exports.createEmailTemplate = async (req, res) => {
   try {
-    const { type, subject, html } = req.body;
+    const { type, subject, html } = req.body || {};
+    if (!EMAIL_TEMPLATE_TYPES.has(type)) {
+      return res.status(400).json({ success: false, message: `Template type must be one of: ${[...EMAIL_TEMPLATE_TYPES].join(', ')}` });
+    }
+    const validationError = getTemplateValidationError({ subject, html });
+    if (validationError) return res.status(400).json({ success: false, message: validationError });
 
     // Check if template already exists
     const existing = await prisma.emailTemplate.findUnique({
@@ -338,6 +361,7 @@ exports.createEmailTemplate = async (req, res) => {
       }
     });
 
+    clearSettingsCache();
     res.json({ success: true, message: 'Email template created successfully', template });
   } catch (error) {
     console.error('Error creating email template:', error);
@@ -348,7 +372,11 @@ exports.createEmailTemplate = async (req, res) => {
 exports.updateEmailTemplate = async (req, res) => {
   try {
     const { type } = req.params;
-    const { subject, html } = req.body;
+    const { subject, html } = req.body || {};
+    const validationError = getTemplateValidationError({ subject, html });
+    if (validationError) return res.status(400).json({ success: false, message: validationError });
+    const existing = await prisma.emailTemplate.findUnique({ where: { type }, select: { id: true } });
+    if (!existing) return res.status(404).json({ success: false, message: 'Email template not found' });
 
     const template = await prisma.emailTemplate.update({
       where: { type },
@@ -358,6 +386,7 @@ exports.updateEmailTemplate = async (req, res) => {
       }
     });
 
+    clearSettingsCache();
     res.json({ success: true, message: 'Email template updated successfully', template });
   } catch (error) {
     console.error('Error updating email template:', error);
@@ -373,6 +402,7 @@ exports.deleteEmailTemplate = async (req, res) => {
       where: { type }
     });
 
+    clearSettingsCache();
     res.json({ success: true, message: 'Email template deleted successfully' });
   } catch (error) {
     console.error('Error deleting email template:', error);
@@ -540,6 +570,7 @@ exports.resetEmailTemplatesToDefault = async (req, res) => {
       });
     }
 
+    clearSettingsCache();
     res.json({ success: true, message: 'Email templates reset to default successfully' });
   } catch (error) {
     console.error('Error resetting email templates:', error);

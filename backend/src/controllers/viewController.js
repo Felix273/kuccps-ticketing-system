@@ -1,12 +1,23 @@
 const prisma = require('../lib/prisma');
 
+// Visibility is a DB enum: private | shared (with a role) | global (everyone).
+// Legacy API values 'public' and 'role' are still accepted.
+const VISIBILITY_ALIASES = { public: 'global', role: 'shared' };
+const VISIBILITIES = new Set(['private', 'shared', 'global']);
+
+function normalizeVisibility(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const normalized = VISIBILITY_ALIASES[value] || value;
+  return VISIBILITIES.has(normalized) ? normalized : null;
+}
+
 function getAccessibleViewWhere(user, entity) {
   return {
     entity: entity || 'tickets',
     OR: [
-      { visibility: 'public' },
+      { visibility: 'global' },
       { ownerId: user.id },
-      { visibility: 'role', role: user.role }
+      { visibility: 'shared', role: user.role }
     ]
   };
 }
@@ -31,7 +42,10 @@ exports.createView = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Name and filters are required' });
     }
 
-    const requestedVisibility = visibility || 'private';
+    const requestedVisibility = normalizeVisibility(visibility) ?? (visibility ? null : 'private');
+    if (!requestedVisibility) {
+      return res.status(400).json({ success: false, message: 'Invalid visibility' });
+    }
     if (requestedVisibility !== 'private' && req.user.role !== 'admin') {
       return res.status(403).json({ success: false, message: 'Only admins can create shared views' });
     }
@@ -45,7 +59,7 @@ exports.createView = async (req, res) => {
         sortBy: sortBy || null,
         sortOrder: sortOrder || 'desc',
         visibility: requestedVisibility,
-        role: requestedVisibility === 'role' ? role : null,
+        role: requestedVisibility === 'shared' ? (role || req.user.role) : null,
         ownerId: req.user.id
       }
     });
@@ -65,7 +79,11 @@ exports.updateView = async (req, res) => {
       return res.status(403).json({ success: false, message: 'You cannot edit this view' });
     }
 
-    const { name, filters, columns, sortBy, sortOrder, visibility, role } = req.body;
+    const { name, filters, columns, sortBy, sortOrder, role } = req.body;
+    const visibility = normalizeVisibility(req.body.visibility);
+    if (visibility === null) {
+      return res.status(400).json({ success: false, message: 'Invalid visibility' });
+    }
     const view = await prisma.savedView.update({
       where: { id: req.params.id },
       data: {

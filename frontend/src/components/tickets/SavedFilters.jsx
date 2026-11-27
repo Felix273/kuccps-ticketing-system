@@ -109,8 +109,8 @@ export const SavedFilters = ({ onLoadFilter, currentFilters, currentUser }) => {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-2 focus:ring-2 focus:ring-[#911414] focus:border-transparent"
             >
               <option value="private">Private</option>
-              <option value="public">Shared with everyone</option>
-              <option value="role">Shared with my role</option>
+              <option value="global">Shared with everyone</option>
+              <option value="shared">Shared with my role</option>
             </select>
           )}
           <div className="flex gap-2">

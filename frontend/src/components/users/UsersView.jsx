@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Users as UsersIcon, 
   RefreshCw, 
@@ -23,15 +23,19 @@ export const UsersView = () => {
   const [viewMode, setViewMode] = useState('table');
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(15);
+  const [itemsPerPage] = useState(15);
 
   const { users = [], isLoading, refetch, syncFromAd } = useUsers();
   const currentUser = authService.getCurrentUser();
   const isAdmin = currentUser?.role === 'admin';
 
-  useEffect(() => {
+  // Reset to page 1 when the search or role filter changes.
+  const filterKey = `${searchQuery}\u0000${filterRole}`;
+  const [pagedFilterKey, setPagedFilterKey] = useState(filterKey);
+  if (pagedFilterKey !== filterKey) {
+    setPagedFilterKey(filterKey);
     setCurrentPage(1);
-  }, [searchQuery, filterRole]);
+  }
 
   const stats = useMemo(() => {
     const total = users.length;

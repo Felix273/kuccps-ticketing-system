@@ -31,7 +31,7 @@ import {
 import { TicketTrendsChart } from './charts/TicketTrendsChart';
 import { TopCategoriesChart } from './TopCategoriesChart';
 import { operationsService } from '../../services/operationsService';
-import { buildTicketTrendData, countTicketsByStatus } from '../../utils/dashboardMetrics';
+import { ticketService } from '../../services/ticketService';
 
 const DONUT_COLORS = {
   Open: '#2563eb',
@@ -58,117 +58,76 @@ const StatusPieTooltip = ({ active, payload }) => {
   );
 };
 
-export const DashboardView = ({ tickets = [], isLoading = false, onViewTickets }) => {
+const EMPTY_OVERVIEW = {
+  total: 0,
+  active: 0,
+  withSla: 0,
+  withCsat: 0,
+  byStatus: { Open: 0, InProgress: 0, OnHold: 0, Resolved: 0, Closed: 0 },
+  trendData: [],
+  departments: [],
+  priorityWatchlist: [],
+  staffLeaderboard: []
+};
+
+// All figures are aggregated by the API (/tickets/overview and /operations/dashboard),
+// so the dashboard never downloads the full ticket list.
+export const DashboardView = ({ refreshKey = 0, onViewTickets }) => {
   const [operationsAnalytics, setOperationsAnalytics] = useState(null);
+  const [overviewState, setOverviewState] = useState({ key: null, data: EMPTY_OVERVIEW, error: null });
 
   useEffect(() => {
-    const loadOperationsAnalytics = async () => {
-      try {
-        const response = await operationsService.getDashboardAnalytics();
-        if (response.success) setOperationsAnalytics(response.analytics);
-      } catch (err) {
-        console.warn('Operations analytics unavailable:', err.message);
-      }
-    };
-    loadOperationsAnalytics();
-  }, [tickets.length]);
+    let active = true;
+    ticketService.getOverview()
+      .then(response => {
+        if (!active) return;
+        if (response.success) setOverviewState({ key: refreshKey, data: response.overview, error: null });
+        else setOverviewState(previous => ({ ...previous, key: refreshKey, error: response.message }));
+      })
+      .catch(err => {
+        if (active) setOverviewState(previous => ({ ...previous, key: refreshKey, error: err.message }));
+      });
+    operationsService.getDashboardAnalytics()
+      .then(response => { if (active && response.success) setOperationsAnalytics(response.analytics); })
+      .catch(err => console.warn('Operations analytics unavailable:', err.message));
+    return () => { active = false; };
+  }, [refreshKey]);
 
-  const analytics = useMemo(() => {
-    const trendData = buildTicketTrendData(tickets);
-    const statusCounts = countTicketsByStatus(tickets);
-    const statusPieData = Object.entries(statusCounts)
+  const overview = overviewState.data;
+  const isLoading = overviewState.key === null;
+
+  const analytics = useMemo(() => ({
+    trendData: overview.trendData,
+    statusPieData: Object.entries(overview.byStatus)
       .map(([name, value]) => ({ name, value }))
-      .filter(item => item.value > 0);
+      .filter(item => item.value > 0),
+    categoryData: operationsAnalytics?.categoryIssues || [],
+    deptTable: overview.departments,
+    priorityWatchlist: overview.priorityWatchlist,
+    staffLeaderboard: overview.staffLeaderboard
+  }), [overview, operationsAnalytics]);
 
-    const categoryData = operationsAnalytics?.categoryIssues || [];
-
-    // 3. Tabular: Directorate SLA Performance Table Data
-    const deptStats = {};
-    tickets.forEach(t => {
-      const deptName = t.assignedTo?.department?.name || t.department?.name || 'Unassigned';
-      if (!deptStats[deptName]) {
-        deptStats[deptName] = { name: deptName, open: 0, resolved: 0, total: 0 };
-      }
-      deptStats[deptName].total++;
-      if (t.status === 'Resolved' || t.status === 'Closed') deptStats[deptName].resolved++;
-      else deptStats[deptName].open++;
-    });
-
-    const deptTable = Object.values(deptStats)
-      .filter(d => d.name !== 'Unassigned')
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 6)
-      .map(d => ({
-        ...d,
-        rate: d.total > 0 ? Math.round((d.resolved / d.total) * 100) : 0
-      }));
-
-    // 4. Tabular: Priority Watchlist Table Data
-    const priorityWatchlist = tickets
-      .filter(t => t.status !== 'Resolved' && t.status !== 'Closed')
-      .sort((a, b) =>
-        Number(['Critical', 'VeryHigh'].includes(b.priority)) -
-        Number(['Critical', 'VeryHigh'].includes(a.priority))
-      )
-      .slice(0, 5);
-
-    // 5. Tabular: Staff Workload Leaderboard Data
-    const userWorkload = {};
-    tickets.forEach(t => {
-      if (t.assignedTo) {
-        const name = t.assignedTo.name;
-        if (!userWorkload[name]) {
-          userWorkload[name] = { name, open: 0, resolved: 0, total: 0 };
-        }
-        userWorkload[name].total++;
-        if (t.status === 'Resolved' || t.status === 'Closed') userWorkload[name].resolved++;
-        else userWorkload[name].open++;
-      }
-    });
-
-    const staffLeaderboard = Object.values(userWorkload)
-      .sort((a, b) => b.resolved - a.resolved)
-      .slice(0, 5)
-      .map(u => ({
-        ...u,
-        rate: u.total > 0 ? Math.round((u.resolved / u.total) * 100) : 0
-      }));
-
-    return {
-      trendData,
-      statusPieData,
-      categoryData,
-      deptTable,
-      priorityWatchlist,
-      staffLeaderboard
-    };
-  }, [tickets, operationsAnalytics]);
-
-  const totalTickets = tickets.length;
-  const activeTickets = tickets.filter(t => ACTIVE_TICKET_STATUSES.has(t.status)).length;
-  const resolvedTickets = tickets.filter(t => t.status === 'Resolved').length;
-  const slaTickets = tickets.filter(t => t.responseDueAt || t.slaDueAt);
+  const totalTickets = overview.total;
+  const activeTickets = overview.active;
+  const resolvedTickets = overview.byStatus.Resolved;
+  const slaTicketCount = overview.withSla;
   const slaRate = operationsAnalytics?.slaCompliance;
   const csatRate = operationsAnalytics?.csatSatisfactionRate;
   const csatScore = operationsAnalytics?.csatScore;
   const csatResponses = operationsAnalytics?.csatResponses || 0;
-  const csatTicketIds = new Set(operationsAnalytics?.csatTicketIds || []);
-  const csatTickets = tickets.filter(ticket => csatTicketIds.has(ticket.id));
   const targetAttainment = operationsAnalytics?.slaTargetAttainment;
   const targetSummaries = ['response', 'resolution'].flatMap(type =>
     (targetAttainment?.[type] || []).map(target =>
       `${type} ${target.actualPercent}% / ${target.targetPercent}% target`
     )
   );
-  const selectTickets = (label, selectedTickets) => {
-    onViewTickets?.({
-      label,
-      ticketIds: selectedTickets.map(ticket => ticket.id)
-    });
+  // Click-throughs open the ticket list with server-side filter criteria.
+  const selectTickets = (label, params = {}) => {
+    onViewTickets?.({ label, params });
   };
   const selectStatus = status => {
     if (!status) return;
-    selectTickets(`${status} tickets`, tickets.filter(ticket => ticket.status === status));
+    selectTickets(`${status} tickets`, { status: [status] });
   };
 
   if (isLoading) {
@@ -191,7 +150,7 @@ export const DashboardView = ({ tickets = [], isLoading = false, onViewTickets }
         {/* Card 1: Total Volume Sparkline */}
         <button
           type="button"
-          onClick={() => selectTickets('All tickets', tickets)}
+          onClick={() => selectTickets('All tickets')}
           aria-label={`View all ${totalTickets} tickets`}
           className="group cursor-pointer p-4 flex flex-col justify-between text-left hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#990024]"
         >
@@ -225,7 +184,7 @@ export const DashboardView = ({ tickets = [], isLoading = false, onViewTickets }
         {/* Card 2: Active Queue Sparkline */}
         <button
           type="button"
-          onClick={() => selectTickets('Active tickets', tickets.filter(ticket => ACTIVE_TICKET_STATUSES.has(ticket.status)))}
+          onClick={() => selectTickets('Active tickets', { status: [...ACTIVE_TICKET_STATUSES] })}
           aria-label={`View ${activeTickets} active tickets`}
           className="group cursor-pointer p-4 flex flex-col justify-between text-left hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#990024]"
         >
@@ -278,7 +237,7 @@ export const DashboardView = ({ tickets = [], isLoading = false, onViewTickets }
         {/* Customer Satisfaction */}
         <button
           type="button"
-          onClick={() => selectTickets('Tickets with customer feedback', csatTickets)}
+          onClick={() => selectTickets('Tickets with customer feedback', { hasCsat: 'true' })}
           disabled={false}
           aria-label={`Customer satisfaction ${csatRate == null ? 'unavailable' : `${csatRate}%`}, ${csatResponses} responses`}
           className="group cursor-pointer p-4 flex flex-col justify-between text-left hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#990024] disabled:cursor-not-allowed disabled:opacity-60"
@@ -306,8 +265,8 @@ export const DashboardView = ({ tickets = [], isLoading = false, onViewTickets }
         {/* Card 4: SLA Compliance Telemetry */}
         <button
           type="button"
-          onClick={() => selectTickets('Tickets with SLA targets', slaTickets)}
-          aria-label={`View ${slaTickets.length} tickets with SLA targets`}
+          onClick={() => selectTickets('Tickets with SLA targets', { hasSla: 'true' })}
+          aria-label={`View ${slaTicketCount} tickets with SLA targets`}
           className="group cursor-pointer p-4 flex flex-col justify-between text-left hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#990024]"
         >
           <div className="flex items-center justify-between text-zinc-400 mb-2">

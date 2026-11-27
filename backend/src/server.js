@@ -88,6 +88,14 @@ app.use((err, req, res, next) => {
     return res.status(403).json({ success: false, message: 'CORS origin denied' });
   }
 
+  if (err?.type === 'entity.parse.failed') {
+    return res.status(400).json({ success: false, message: 'Request body is not valid JSON' });
+  }
+
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({ success: false, message: 'Request body is too large' });
+  }
+
   if (err?.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ success: false, message: 'Uploaded file is too large' });
   }
@@ -105,6 +113,11 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`✓ Server running at http://${HOST}:${PORT}`);
   console.log(`✓ API available at http://${HOST}:${PORT}`);
   startNotificationJobs();
+
+  // Encrypt any credentials still stored as plaintext (legacy rows); idempotent.
+  require('./services/secretBox').encryptStoredSecrets(prisma)
+    .then(count => { if (count) console.log(`✓ Encrypted stored credentials in ${count} settings record(s)`); })
+    .catch(error => console.error('Credential encryption check failed:', error.message));
 
   // Start email monitoring if credentials are configured
   if (process.env.EMAIL_USER && process.env.IMAP_USER) {

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Building2, 
   RefreshCw, 
@@ -14,11 +14,10 @@ import { UserTicketsDrawer } from './UserTicketsDrawer';
 import { TicketAssignModal } from '../tickets/TicketAssignModal';
 import { useDepartments } from '../../hooks/useDepartments';
 import { useUsers } from '../../hooks/useUsers';
-import { useTickets } from '../../hooks/useTickets';
 import { ticketService } from '../../services/ticketService';
 import { authService } from '../../services/authService';
 
-export const DepartmentsView = ({ departments: propDepartments, isLoading: propLoading }) => {
+export const DepartmentsView = ({ departments: propDepartments, isLoading: propLoading, refreshKey = 0 }) => {
   const [viewingDepartment, setViewingDepartment] = useState(null);
   const [viewingUser, setViewingUser] = useState(null);
   const [reassigningTicket, setReassigningTicket] = useState(null);
@@ -26,13 +25,29 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
   const [searchQuery, setSearchQuery] = useState('');
 
   const hookData = useDepartments(!propDepartments);
-  const departments = propDepartments || hookData.departments || [];
+  const hookDepartments = hookData.departments;
+  const departments = useMemo(
+    () => propDepartments || hookDepartments || [],
+    [propDepartments, hookDepartments]
+  );
   const isLoading = propLoading !== undefined ? propLoading : hookData.isLoading;
   const { fetchDepartments } = hookData;
   const syncDepartmentsFromAd = hookData.syncFromAd;
 
   const { users = [] } = useUsers();
-  const { tickets = [], fetchTickets } = useTickets(true);
+  // Ticket counts per directorate/officer are aggregated by the API (no full ticket download).
+  const [workloadState, setWorkloadState] = useState({ key: null, data: { departments: {}, users: {}, activeTotal: 0 } });
+  const [workloadReload, setWorkloadReload] = useState(0);
+  const workloadKey = `${refreshKey}:${workloadReload}`;
+  useEffect(() => {
+    let active = true;
+    ticketService.getWorkload()
+      .then(response => { if (active && response.success) setWorkloadState({ key: workloadKey, data: response.workload }); })
+      .catch(error => console.error('Failed to load workload:', error));
+    return () => { active = false; };
+  }, [workloadKey]);
+  const workload = workloadState.data;
+  const fetchTickets = () => setWorkloadReload(count => count + 1);
   const currentUser = authService.getCurrentUser();
   const isAdmin = currentUser?.role === 'admin';
 
@@ -48,9 +63,8 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
   const stats = useMemo(() => {
     const totalDepts = departments.length;
     const staffAssigned = users.filter(u => u.departmentId || u.department).length;
-    const activeTickets = tickets.filter(t => ['Open', 'InProgress', 'OnHold'].includes(t.status)).length;
-    return { totalDepts, staffAssigned, activeTickets };
-  }, [departments, users, tickets]);
+    return { totalDepts, staffAssigned, activeTickets: workload.activeTotal };
+  }, [departments, users, workload.activeTotal]);
 
   const handleRefresh = () => {
     if (fetchDepartments) fetchDepartments();
@@ -178,7 +192,7 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
           <DepartmentCard
             key={dept.id}
             department={dept}
-            tickets={tickets}
+            stats={workload.departments[dept.id]}
             users={users}
             onViewDetails={() => setViewingDepartment(dept)}
           />
@@ -189,7 +203,8 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
       {viewingDepartment && (
         <DepartmentDetailModal
           department={viewingDepartment}
-          tickets={tickets}
+          departmentStats={workload.departments[viewingDepartment.id]}
+          userStats={workload.users}
           users={users}
           currentUser={currentUser}
           onClose={() => setViewingDepartment(null)}
@@ -200,7 +215,7 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
       {viewingUser && (
         <UserTicketsDrawer
           user={viewingUser}
-          tickets={tickets}
+          refreshKey={workloadKey}
           currentUser={currentUser}
           onClose={() => setViewingUser(null)}
           onReassign={(t) => setReassigningTicket(t)}
@@ -214,7 +229,7 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
           onAssign={async (userId) => {
             const res = await ticketService.assign(reassigningTicket.id, userId);
             if (res.success) {
-              await fetchTickets();
+              fetchTickets();
               setReassigningTicket(null);
             }
             return res;

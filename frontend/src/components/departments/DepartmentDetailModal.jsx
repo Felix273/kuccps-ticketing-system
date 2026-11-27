@@ -12,7 +12,10 @@ import {
   Ticket
 } from 'lucide-react';
 
-export const DepartmentDetailModal = ({ department, tickets = [], users = [], onClose, onViewUserTickets }) => {
+const EMPTY_STATS = { total: 0, open: 0, inProgress: 0, onHold: 0, resolved: 0, closed: 0, critical: 0, unclaimed: 0 };
+
+// departmentStats / userStats come from GET /tickets/workload.
+export const DepartmentDetailModal = ({ department, departmentStats, userStats: workloadByUser = {}, users = [], onClose, onViewUserTickets }) => {
   const [sortBy, setSortBy] = useState('tickets');
 
   const deptUsers = useMemo(() => {
@@ -24,27 +27,14 @@ export const DepartmentDetailModal = ({ department, tickets = [], users = [], on
     );
   }, [users, department]);
 
-  const deptTickets = useMemo(() => {
-    return tickets.filter(t => 
-      t.department?.name === department.name || 
-      t.departmentId === department.id ||
-      deptUsers.some(u => u.id === t.assignedToId)
-    );
-  }, [tickets, department, deptUsers]);
-
   const userStats = useMemo(() => {
     return deptUsers.map(user => {
-      const userTickets = deptTickets.filter(t => t.assignedToId === user.id);
-      const open = userTickets.filter(t => t.status === 'Open').length;
-      const inProgress = userTickets.filter(t => t.status === 'InProgress').length;
-      const onHold = userTickets.filter(t => t.status === 'OnHold').length;
-      const resolved = userTickets.filter(t => t.status === 'Resolved').length;
-      const closed = userTickets.filter(t => t.status === 'Closed').length;
-      const critical = userTickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved' && t.status !== 'Closed').length;
-      
+      const stats = workloadByUser[user.id] || EMPTY_STATS;
+      const { open, inProgress, onHold, resolved, closed, critical } = stats;
+
       return {
         ...user,
-        ticketCount: userTickets.length,
+        ticketCount: stats.total,
         open,
         inProgress,
         onHold,
@@ -58,18 +48,10 @@ export const DepartmentDetailModal = ({ department, tickets = [], users = [], on
       if (sortBy === 'workload') return b.workload - a.workload;
       return (a.name || '').localeCompare(b.name || '');
     });
-  }, [deptUsers, deptTickets, sortBy]);
+  }, [deptUsers, workloadByUser, sortBy]);
 
-  const deptStats = {
-    totalTickets: deptTickets.length,
-    open: deptTickets.filter(t => t.status === 'Open').length,
-    inProgress: deptTickets.filter(t => t.status === 'InProgress').length,
-    onHold: deptTickets.filter(t => t.status === 'OnHold').length,
-    resolved: deptTickets.filter(t => t.status === 'Resolved').length,
-    closed: deptTickets.filter(t => t.status === 'Closed').length,
-    critical: deptTickets.filter(t => t.priority === 'Critical' && t.status !== 'Resolved' && t.status !== 'Closed').length,
-    unclaimed: deptTickets.filter(t => !t.assignedToId).length
-  };
+  const totals = departmentStats || EMPTY_STATS;
+  const deptStats = { ...totals, totalTickets: totals.total };
 
   const resolutionRate = deptStats.totalTickets > 0 
     ? Math.round(((deptStats.resolved + deptStats.closed) / deptStats.totalTickets) * 100) 

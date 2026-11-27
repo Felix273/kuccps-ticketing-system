@@ -28,6 +28,26 @@ function serializeArticle(article) {
   return serialized;
 }
 
+// Anonymous self-service readers get the article content only: no revision history
+// (which can hold unpublished draft text), internal author IDs or storage keys.
+function serializePublicArticle(article) {
+  const serialized = serializeArticle(article);
+  if (!serialized) return serialized;
+  delete serialized.revisions;
+  delete serialized.authorId;
+  delete serialized.deletedAt;
+  if (Array.isArray(serialized.attachments)) {
+    serialized.attachments = serialized.attachments.map(({ name, size, mimeType }) => ({ name, size, mimeType }));
+  }
+  return serialized;
+}
+
+function queryText(value, maxLength = 200) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') return null;
+  return value.trim().slice(0, maxLength);
+}
+
 async function syncArticleCollections(client, articleId, { tags, relatedArticles }) {
   if (tags !== undefined) {
     await client.knowledgeArticleTag.deleteMany({ where: { articleId } });
@@ -131,9 +151,17 @@ function getMissingInfo(ticket) {
 // ── 1. GET ARTICLES (Search with Telemetry & Device Filter) ───
 exports.getArticles = async (req, res) => {
   try {
-    const { q, category, device, tag, includeArchived } = req.query;
+    const q = queryText(req.query.q);
+    const category = queryText(req.query.category, 120);
+    const device = queryText(req.query.device, 120);
+    const tag = queryText(req.query.tag, 80);
+    const rawStatus = queryText(req.query.status, 40);
+    if ([q, category, device, tag, rawStatus].includes(null)) {
+      return res.status(400).json({ success: false, message: 'Search parameters must be single text values' });
+    }
+    const { includeArchived } = req.query;
     // Guard against literal string 'undefined' from URLSearchParams
-    const status = req.query.status && req.query.status !== 'undefined' ? req.query.status : undefined;
+    const status = rawStatus && rawStatus !== 'undefined' ? rawStatus : undefined;
     const isStaffOrAdmin = req.user && ['admin', 'staff'].includes(req.user.role);
     
     // Status filter: Public only sees published. Staff sees published/pending.
@@ -196,7 +224,11 @@ exports.getArticles = async (req, res) => {
       }).catch(err => console.warn('Search log skipped:', err.message));
     }
 
-    res.json({ success: true, count: articles.length, articles: serializeArticles(articles) });
+    res.json({
+      success: true,
+      count: articles.length,
+      articles: req.user ? serializeArticles(articles) : articles.map(serializePublicArticle)
+    });
   } catch (error) {
     console.error('Get articles error:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch articles' });
@@ -207,6 +239,7 @@ exports.getArticles = async (req, res) => {
 exports.getArticle = async (req, res) => {
   try {
     const idOrSlug = req.params.idOrSlug;
+    const isPublicRequest = !req.user;
     const article = await prisma.knowledgeArticle.findFirst({
       where: {
         OR: [
@@ -216,14 +249,16 @@ exports.getArticle = async (req, res) => {
       },
       include: {
         ...articleRelations,
-        revisions: {
-          orderBy: { version: 'desc' },
-          take: 5
-        }
+        ...(isPublicRequest ? {} : {
+          revisions: {
+            orderBy: { version: 'desc' },
+            take: 5
+          }
+        })
       }
     });
 
-    if (!article || (!req.user && article.status !== 'published')) {
+    if (!article || (isPublicRequest && (article.status !== 'published' || article.isArchived))) {
       return res.status(404).json({ success: false, message: 'Article not found' });
     }
 
@@ -233,7 +268,8 @@ exports.getArticle = async (req, res) => {
       data: { views: { increment: 1 } }
     }).catch(() => null);
 
-    res.json({ success: true, article: serializeArticle({ ...article, views: article.views + 1 }) });
+    const serialize = isPublicRequest ? serializePublicArticle : serializeArticle;
+    res.json({ success: true, article: serialize({ ...article, views: article.views + 1 }) });
   } catch (error) {
     console.error('Get article error:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch article' });
@@ -539,7 +575,18 @@ exports.getSearchGaps = async (req, res) => {
 exports.submitFeedback = async (req, res) => {
   try {
     const { id } = req.params;
-    const { wasHelpful, comment } = req.body;
+    const { wasHelpful, comment } = req.body || {};
+    if (typeof wasHelpful !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'wasHelpful must be true or false' });
+    }
+    if (comment != null && (typeof comment !== 'string' || comment.length > 1000)) {
+      return res.status(400).json({ success: false, message: 'Comment must be text of at most 1000 characters' });
+    }
+    const article = await prisma.knowledgeArticle.findFirst({
+      where: { id, status: 'published', isArchived: false },
+      select: { id: true }
+    });
+    if (!article) return res.status(404).json({ success: false, message: 'Article not found' });
 
     await Promise.all([
       prisma.knowledgeArticle.update({
@@ -549,8 +596,8 @@ exports.submitFeedback = async (req, res) => {
       prisma.knowledgeFeedback.create({
         data: {
           articleId: id,
-          wasHelpful: Boolean(wasHelpful),
-          comment: comment || null,
+          wasHelpful,
+          comment: comment?.trim() || null,
           userId: req.user?.id || null
         }
       })
@@ -565,7 +612,9 @@ exports.submitFeedback = async (req, res) => {
 exports.rateArticle = async (req, res) => {
   try {
     const { id } = req.params;
-    const { helpful } = req.body;
+    const { helpful } = req.body || {};
+    const exists = await prisma.knowledgeArticle.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) return res.status(404).json({ success: false, message: 'Article not found' });
     await prisma.knowledgeArticle.update({
       where: { id },
       data: helpful ? { helpful: { increment: 1 } } : { notHelpful: { increment: 1 } }

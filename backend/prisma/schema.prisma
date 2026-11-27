@@ -62,6 +62,7 @@ model User {
   ldapDn         String?
   ldapObjectGuid String?
   lastSyncedAt   DateTime?
+  tokensRevokedAt DateTime?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
@@ -673,4 +674,22 @@ model KnowledgeFeedback {
   createdAt  DateTime         @default(now())
 
   @@index([articleId])
+}
+
+// Inbound IMAP messages already turned into tickets/comments (prevents re-processing).
+model ProcessedEmail {
+  messageId String   @id
+  ticketId  String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// Shared rate-limit counters so limits hold across multiple backend instances.
+model RateLimitBucket {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+
+  @@index([resetAt])
 }
