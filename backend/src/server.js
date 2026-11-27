@@ -40,6 +40,7 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '1mb' }));
+
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 600, keyPrefix: 'api' }));
 
 // Routes

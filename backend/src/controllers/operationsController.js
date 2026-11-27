@@ -404,6 +404,16 @@ exports.createCsatResponse = async (req, res) => {
     if (!RESOLVED_STATUSES.has(ticket.status)) {
       return res.status(400).json({ success: false, message: 'Feedback is available after a ticket is resolved' });
     }
+
+    const existing = await prisma.csatResponse.findFirst({
+      where: { ticketId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, rating: true, comment: true, createdAt: true }
+    });
+    if (existing) {
+      return res.status(200).json({ success: true, message: 'Feedback already recorded for this ticket', response: existing });
+    }
+
     const response = await prisma.csatResponse.create({
       data: {
         ticketId,
@@ -481,6 +491,15 @@ exports.createPublicCsatResponse = async (req, res) => {
     }
     if (!RESOLVED_STATUSES.has(ticket.status)) {
       return res.status(409).json({ success: false, message: 'This ticket is no longer resolved and cannot receive feedback' });
+    }
+
+    const existing = await prisma.csatResponse.findFirst({
+      where: { ticketId: ticket.id },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, rating: true, comment: true, createdAt: true }
+    });
+    if (existing) {
+      return res.status(200).json({ success: true, message: 'Feedback already recorded for this ticket', response: existing, ticketStatus: ticket.status });
     }
 
     const requester = await prisma.user.findUnique({

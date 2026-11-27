@@ -14,7 +14,21 @@ const {
   isActiveTicketOverdue
 } = require('../services/slaService');
 const prisma = require('../lib/prisma');
-const VALID_PRIORITIES = new Set(['VeryHigh', 'High', 'Medium', 'Low', 'VeryLow', 'Critical']);
+function normalizePriority(value) {
+  if (!value) return null;
+  const cleaned = String(value).replace(/\s+/g, '').toLowerCase();
+  const map = {
+    veryhigh: 'VeryHigh',
+    high: 'High',
+    medium: 'Medium',
+    low: 'Low',
+    verylow: 'VeryLow',
+    critical: 'VeryHigh',
+    normal: 'Medium',
+    urgent: 'High'
+  };
+  return map[cleaned] || null;
+}
 
 function decorateTicket(ticket) {
   if (!ticket) return ticket;
@@ -79,9 +93,11 @@ exports.createTicket = async (req, res) => {
     if (safeSubject.length < 3 || safeDescription.length < 5) {
       return res.status(400).json({ success: false, message: 'Ticket subject or description is too short' });
     }
-    if (priority && !VALID_PRIORITIES.has(priority)) {
+    const normalizedPriority = normalizePriority(priority);
+if (priority && !normalizedPriority) {
       return res.status(400).json({ success: false, message: 'Invalid priority' });
     }
+    const resolvedPriorityInput = normalizedPriority || undefined;
     let existingUser = null;
     let createdById = null;
     try {
@@ -120,7 +136,7 @@ exports.createTicket = async (req, res) => {
     // Get system settings for defaults
     const settings = await prisma.systemSettings.findFirst();
     const ticketNumber = await generateTicketNumber();
-    const resolvedPriority = priority || (settings ? settings.defaultPriority : 'Medium');
+    const resolvedPriority = resolvedPriorityInput || normalizePriority(settings ? settings.defaultPriority : null) || 'Medium';
     const resolvedCategory = category || (settings ? settings.defaultCategory : 'General Issues');
     const createdAt = new Date();
     const slaDeadlines = await getConfiguredTicketSlaDeadlines(prisma, resolvedCategory, resolvedPriority, createdAt);
@@ -186,7 +202,18 @@ exports.getAllTickets = async (req, res) => {
       include: { department: true, assignedTo: { select: { id: true, name: true, email: true } }, createdBy: { select: { id: true, name: true, email: true } }, _count: { select: { comments: true } } },
       orderBy: { createdAt: 'desc' }
     });
-    return res.json({ success: true, tickets: tickets.map(decorateTicket) });
+
+    const ratedTicketIds = new Set(
+      (await prisma.csatResponse.findMany({
+        select: { ticketId: true },
+        distinct: ['ticketId']
+      })).map((r) => r.ticketId)
+    );
+
+    return res.json({
+      success: true,
+      tickets: tickets.map((t) => ({ ...decorateTicket(t), csatRated: ratedTicketIds.has(t.id) }))
+    });
   } catch (error) {
     console.error('Error fetching tickets:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch tickets' });
@@ -229,7 +256,8 @@ exports.updateTicket = async (req, res) => {
     if (status && !VALID_TICKET_STATUSES.has(status)) {
       return res.status(400).json({ success: false, message: 'Invalid ticket status' });
     }
-    if (priority && !VALID_PRIORITIES.has(priority)) {
+    const normalizedUpdatePriority = priority ? normalizePriority(priority) : null;
+    if (priority && !normalizedUpdatePriority) {
       return res.status(400).json({ success: false, message: 'Invalid ticket priority' });
     }
     const userId = req.user?.id;
@@ -268,9 +296,9 @@ exports.updateTicket = async (req, res) => {
         updateData.closedAt = null;
       }
     }
-    if (priority && priority !== existing.priority) {
-      updateData.priority = priority;
-      historyEntries.push({ field: 'priority', oldValue: existing.priority, newValue: priority });
+    if (normalizedUpdatePriority && normalizedUpdatePriority !== existing.priority) {
+      updateData.priority = normalizedUpdatePriority;
+      historyEntries.push({ field: 'priority', oldValue: existing.priority, newValue: normalizedUpdatePriority });
     }
     if (assignedToId !== undefined && assignedToId !== existing.assignedToId) {
       if (assignedToId) {
@@ -443,6 +471,11 @@ exports.escalateTicket = async (req, res) => {
         isInternal: true,
         content: `Escalated ${type} to ${targetUser.name}.${safeReason ? ` Reason: ${safeReason}` : ''}`
       }
+    });
+await sendEmail(targetUser.email, 'ticketUpdated', {
+      ...updated,
+      emailMessageId: ticket.emailMessageId,
+      comment: `A ticket has been escalated to you: ${updated.ticketNumber} - ${updated.subject}`
     });
 
     if (targetUser.id !== userId) {

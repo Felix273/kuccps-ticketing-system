@@ -1,3 +1,4 @@
+import { Toaster, toast } from 'react-hot-toast';
 import React, { useState, useEffect } from 'react';
 import { HomePage } from './components/auth/HomePage';
 import { LoginPage } from './components/auth/LoginPage';
@@ -14,6 +15,7 @@ import { settingsService } from './services/settingsService';
 import { accessControlService } from './services/accessControlService';
 import { useTickets } from './hooks/useTickets';
 import { useStatistics } from './hooks/useStatistics';
+import { useIdleLogout } from './hooks/useIdleLogout';
 
 function App() {
   const initialUser = authService.getCurrentUser();
@@ -105,8 +107,18 @@ function App() {
     setShowHomePage(true);
   };
 
+  useIdleLogout(isAuthenticated, () => {
+    handleLogout();
+    toast('You have been signed out due to 5 minutes of inactivity.');
+  });
+
   if (showHomePage && !isAuthenticated) {
-    return <HomePage onGetStarted={() => setShowHomePage(false)} />;
+    return (
+      <>
+        <HomePage onGetStarted={() => setShowHomePage(false)} />
+        <Toaster position="top-right" toastOptions={{ className: "font-mono text-xs border border-zinc-200 bg-white text-zinc-900 shadow-lg rounded-lg p-3", duration: 3500 }} />
+      </>
+    );
   }
 
   if (!isAuthenticated) {
@@ -175,6 +187,7 @@ function App() {
             <AdminPanel currentUser={currentUser} />
           )}
         </main>
+      <Toaster position="top-right" toastOptions={{ className: "font-mono text-xs border border-zinc-200 bg-white text-zinc-900 shadow-lg rounded-lg p-3", duration: 3500 }} />
       </div>
     </div>
   );

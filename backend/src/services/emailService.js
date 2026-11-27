@@ -206,6 +206,11 @@ async function sendEmail(to, templateType, data) {
     const replaceAllLiteral = (input, token, value) =>
       input.split(token).join(String(value));
 
+    // Track whether the template had a {{csatLinks}} placeholder before replacement.
+    // If it did, the loop below already replaced it with rendered links; if not,
+    // we need to append them via ensureWorkingCsatLinks.
+    const hadCsatLinksPlaceholder = html.includes('{{csatLinks}}');
+
     // Apply replacements literally. Do not use RegExp here: legacy tokens like
     // [TICKET_NUMBER] contain regex metacharacters and would corrupt templates.
     for (const [placeholder, value] of Object.entries(replacements)) {
@@ -214,7 +219,12 @@ async function sendEmail(to, templateType, data) {
     }
 
     if (templateType === 'ticketResolved' && data.id && data.requesterEmail) {
-      html = ensureWorkingCsatLinks(html, data, settings.primaryColor || '#911414');
+      // Only append CSAT links if the template did not already contain {{csatLinks}}.
+      // When {{csatLinks}} was present it was already replaced above; calling
+      // ensureWorkingCsatLinks unconditionally would append a duplicate block.
+      if (!hadCsatLinksPlaceholder) {
+        html = ensureWorkingCsatLinks(html, data, settings.primaryColor || '#911414');
+      }
     }
 
     const ticketTemplateTypes = new Set(['ticketCreated', 'ticketUpdated', 'ticketResolved']);

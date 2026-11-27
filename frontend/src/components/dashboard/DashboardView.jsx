@@ -279,7 +279,7 @@ export const DashboardView = ({ tickets = [], isLoading = false, onViewTickets }
         <button
           type="button"
           onClick={() => selectTickets('Tickets with customer feedback', csatTickets)}
-          disabled={!operationsAnalytics || csatResponses === 0}
+          disabled={false}
           aria-label={`Customer satisfaction ${csatRate == null ? 'unavailable' : `${csatRate}%`}, ${csatResponses} responses`}
           className="group cursor-pointer p-4 flex flex-col justify-between text-left hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#990024] disabled:cursor-not-allowed disabled:opacity-60"
         >

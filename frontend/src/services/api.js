@@ -37,9 +37,10 @@ class ApiService {
 
     try {
       const response = await fetch(`${this.baseURL}${endpoint}`, config);
+      const isLoginEndpoint = endpoint === '/auth/login';
       
-      // Handle authentication errors
-      if (response.status === 401) {
+      // Handle authentication errors (skip login: 401 there means invalid credentials, not an expired token)
+      if (response.status === 401 && !isLoginEndpoint) {
         // Clear invalid token
         localStorage.removeItem('token');
         localStorage.removeItem('user');
@@ -60,8 +61,8 @@ class ApiService {
             message: await response.text()
           };
       
-      // Check if response indicates failure
-      if (!response.ok && !data.success) {
+      // Check if response indicates failure (login failures return the server message to the caller)
+      if (!response.ok && !data.success && !isLoginEndpoint) {
         throw new Error(data.message || `Request failed with status ${response.status}`);
       }
       

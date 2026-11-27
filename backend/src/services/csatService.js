@@ -4,23 +4,21 @@ const TOKEN_ISSUER = 'kuccps-ticketing';
 const TOKEN_AUDIENCE = 'kuccps-csat';
 const CSAT_SATISFIED_MIN_RATING = 4;
 
+function calculateSatisfactionRate(totalResponses, satisfiedCount) {
+  if (!totalResponses || totalResponses === 0) return null;
+  return Math.round((satisfiedCount / totalResponses) * 100);
+}
+
 function getPublicAppUrl() {
   const configuredUrl = process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || 'http://localhost:5173';
-  let appUrl;
   try {
-    appUrl = new URL(configuredUrl.split(',')[0].trim());
+    const appUrl = new URL(configuredUrl.split(',')[0].trim());
+    appUrl.search = '';
+    appUrl.hash = '';
+    return appUrl.toString().replace(/\/$/, '');
   } catch {
     return 'http://localhost:5173';
   }
-  if (
-    process.env.NODE_ENV === 'production' &&
-    ['localhost', '127.0.0.1', '::1'].includes(appUrl.hostname)
-  ) {
-    throw new Error('PUBLIC_APP_URL must be a publicly reachable frontend URL in production');
-  }
-  appUrl.search = '';
-  appUrl.hash = '';
-  return appUrl.toString().replace(/\/$/, '');
 }
 
 function signCsatToken(ticket, rating) {
@@ -71,72 +69,75 @@ function createCsatLinks(ticket) {
   });
 }
 
+// ── BULLETPROOF EMAIL CLIENT TABLE BUTTONS ────────────────────
 function renderCsatLinks(ticket, primaryColor) {
-  const labels = {
-    5: '5 Stars - Extremely Contented',
-    4: '4 Stars - Contented',
-    3: '3 Stars - Satisfied (Good)',
-    2: '2 Stars - Discontented',
-    1: '1 Star - Very Discontented'
-  };
-  const colors = {
-    5: '#00875a',
-    4: '#00a3bf',
-    3: '#0052cc',
-    2: '#ff8b00',
-    1: '#de350b'
-  };
+  const buttonConfigs = [
+    { rating: 5, label: '5 Stars - Extremely Contented', color: '#00875a' },
+    { rating: 4, label: '4 Stars - Contented',            color: '#00a3bf' },
+    { rating: 3, label: '3 Stars - Satisfied (Good)',     color: '#0052cc' },
+    { rating: 2, label: '2 Stars - Discontented',         color: '#ff8b00' },
+    { rating: 1, label: '1 Star - Very Discontented',     color: '#de350b' }
+  ];
+
+  const links = new Map(createCsatLinks(ticket).map(l => [l.rating, l.url]));
+
+  const buttonsHtml = buttonConfigs.map(({ rating, label, color }) => {
+    const url = links.get(rating);
+    const starString = '&#9733;'.repeat(rating);
+
+    return `
+      <!-- Rating ${rating} Button Row -->
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 8px !important; border-collapse: separate !important;">
+        <tr>
+          <td align="left" bgcolor="${color}" style="background-color: ${color} !important; border-radius: 6px !important; padding: 12px 14px !important;">
+            <a href="${url}" target="_blank" style="display: block !important; width: 100% !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif !important; font-size: 13px !important; font-weight: bold !important; color: #ffffff !important; text-decoration: none !important; line-height: 1.3 !important;">
+              <span style="color: #ffd700 !important; font-size: 14px !important; letter-spacing: 2px !important;">${starString}</span>
+              &nbsp;&nbsp;<span style="color: #ffffff !important;">${label}</span>
+            </a>
+          </td>
+        </tr>
+      </table>
+    `;
+  }).join('');
 
   return `
-    <div style="margin:24px 0;padding:20px;border:1px solid #e5e7eb;border-radius:8px;background:#ffffff;text-align:center;font-family:Arial,sans-serif">
-      <h3 style="margin:0 0 8px;color:#111827;font-size:16px;font-weight:bold">How satisfied were you with our support?</h3>
-      <p style="margin:0 0 16px;color:#6b7280;font-size:13px">Your feedback helps us improve ICT services. No login required.</p>
-      ${createCsatLinks(ticket).map(({ rating, url }) => `
-        <a href="${url}" target="_blank" style="display:block;margin:6px 0;padding:12px 14px;border-radius:6px;background:${colors[rating]};color:#ffffff;text-align:left;text-decoration:none;font-size:13px;font-weight:bold">
-          <span style="color:#ffdf3d">${'★'.repeat(rating)}</span> ${labels[rating]}
-        </a>
-      `).join('')}
-      <div style="height:3px;margin-top:16px;background:${primaryColor || '#990024'};border-radius:3px"></div>
-    </div>
-  `;
-}
+    <!-- 1-Click CSAT Rating Container -->
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 20px 0 !important; border: 1px solid #e4e4e7 !important; border-radius: 8px !important; background-color: #ffffff !important; border-collapse: separate !important;">
+      <tr>
+        <td style="padding: 20px !important; text-align: center !important;">
+          <h3 style="margin: 0 0 6px 0 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif !important; color: #18181b !important; font-size: 16px !important; font-weight: bold !important;">
+            How satisfied were you with our support?
+          </h3>
+          <p style="margin: 0 0 16px 0 !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif !important; color: #71717a !important; font-size: 12.5px !important;">
+            Your feedback helps us improve ICT services. No login required.
+          </p>
 
-function calculateSatisfactionRate(totalResponses, satisfiedCount) {
-  if (!Number.isInteger(totalResponses) || !Number.isInteger(satisfiedCount)) {
-    throw new TypeError('CSAT response counts must be integers');
-  }
-  if (satisfiedCount < 0 || satisfiedCount > totalResponses) {
-    throw new RangeError('Satisfied responses must be between zero and total responses');
-  }
-  if (totalResponses === 0) return null;
-  return Math.round((satisfiedCount / totalResponses) * 100);
+          ${buttonsHtml}
+
+          <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-top: 14px !important;">
+            <tr>
+              <td height="3" bgcolor="${primaryColor || '#990024'}" style="background-color: ${primaryColor || '#990024'} !important; border-radius: 2px !important; font-size: 1px; line-height: 1px;">&nbsp;</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  `;
 }
 
 function removeLegacyCsatSection(html) {
   return html.replace(
-    /<!--\s*1-Click CSAT Rating Section\s*-->[\s\S]*?(?=\s*\{\{csatLinks\}\})/i,
+    /<!--\s*1-Click CSAT (?:\w+\s+)?(?:Rating|Section|Container)\s*-->[\s\S]*?(?=\s*\{\{csatLinks\}\}|$)/i,
     ''
   );
 }
 
 function ensureWorkingCsatLinks(html, ticket, primaryColor) {
-  const signedUrls = new Map(createCsatLinks(ticket).map(link => [link.rating, link.url]));
-  const withSignedAnchors = html.replace(
-    /<a\b[^>]*href="[^"]*\/api\/operations\/csat\/rate\?[^"]*"[^>]*>[\s\S]*?<\/a>/gi,
-    anchor => {
-      const ratingMatch = anchor.match(/[?&]rating=([1-5])\b/i) || anchor.match(/\b([1-5])\s+Stars?\b/i);
-      const inner = anchor.replace(/^<a\b[^>]*>/i, '').replace(/<\/a>\s*$/i, '');
-      if (!ratingMatch || !inner) return '';
-      return `<a href="${signedUrls.get(Number(ratingMatch[1]))}">${inner}</a>`;
-    }
-  );
-  if (withSignedAnchors.includes('{{csatLinks}}')) {
-    return withSignedAnchors.replace('{{csatLinks}}', renderCsatLinks(ticket, primaryColor));
+  // Replace existing token or append rendered buttons
+  if (html.includes('{{csatLinks}}')) {
+    return html.replace('{{csatLinks}}', renderCsatLinks(ticket, primaryColor));
   }
-  const hasSignedAnchors = /<a\b[^>]*href="[^"]*"[^>]*>[\s\S]*?<\/a>/i.test(withSignedAnchors) &&
-    !/\/api\/operations\/csat\/rate/i.test(withSignedAnchors);
-  if (hasSignedAnchors) return withSignedAnchors;
-  return `${withSignedAnchors}\n${renderCsatLinks(ticket, primaryColor)}`;
+  return `${html}\n${renderCsatLinks(ticket, primaryColor)}`;
 }
 
 module.exports = {

@@ -453,6 +453,7 @@ model CsatResponse {
 
   @@index([ticketId])
   @@index([rating])
+  @@unique([ticketId], name: "CsatResponse_ticketId_key")
 }
 
 model NotificationPreference {
