@@ -1,17 +1,17 @@
 const express = require('express');
 const accessControlController = require('../controllers/accessControlController');
-const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { authenticateToken, requirePermission } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.get('/me', authenticateToken, accessControlController.getMyAccess);
-router.use(authenticateToken, requireAdmin);
-router.get('/roles', accessControlController.getRoles);
-router.post('/roles', accessControlController.createRole);
-router.put('/roles/:id', accessControlController.updateRole);
-router.delete('/roles/:id', accessControlController.deleteRole);
-router.get('/users', accessControlController.getUsers);
-router.put('/users/:userId/roles', accessControlController.replaceUserRoles);
-router.get('/audit', accessControlController.getAuditLog);
+router.use(authenticateToken);
+router.get('/me', accessControlController.getMyAccess);
+router.get('/roles', requirePermission('access.manage'), accessControlController.getRoles);
+router.post('/roles', requirePermission('access.manage'), accessControlController.createRole);
+router.put('/roles/:id', requirePermission('access.manage'), accessControlController.updateRole);
+router.delete('/roles/:id', requirePermission('access.manage'), accessControlController.deleteRole);
+router.get('/users', requirePermission('access.manage'), accessControlController.getUsers);
+router.put('/users/:userId/roles', requirePermission('access.manage'), accessControlController.replaceUserRoles);
+router.get('/audit', requirePermission('audit.view', 'access.manage'), accessControlController.getAuditLog);
 
 module.exports = router;

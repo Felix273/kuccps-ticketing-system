@@ -15,6 +15,7 @@ import {
 import { UserCard } from './UserCard';
 import { useUsers } from '../../hooks/useUsers';
 import { authService } from '../../services/authService';
+import { can } from '../../utils/permissions';
 
 export const UsersView = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -27,7 +28,7 @@ export const UsersView = () => {
 
   const { users = [], isLoading, refetch, syncFromAd } = useUsers();
   const currentUser = authService.getCurrentUser();
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = can(currentUser, 'settings.directory'); // may run AD sync
 
   // Reset to page 1 when the search or role filter changes.
   const filterKey = `${searchQuery}\u0000${filterRole}`;

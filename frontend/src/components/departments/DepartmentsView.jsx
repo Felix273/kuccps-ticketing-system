@@ -16,6 +16,7 @@ import { useDepartments } from '../../hooks/useDepartments';
 import { useUsers } from '../../hooks/useUsers';
 import { ticketService } from '../../services/ticketService';
 import { authService } from '../../services/authService';
+import { can } from '../../utils/permissions';
 
 export const DepartmentsView = ({ departments: propDepartments, isLoading: propLoading, refreshKey = 0 }) => {
   const [viewingDepartment, setViewingDepartment] = useState(null);
@@ -49,7 +50,8 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
   const workload = workloadState.data;
   const fetchTickets = () => setWorkloadReload(count => count + 1);
   const currentUser = authService.getCurrentUser();
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdmin = can(currentUser, 'settings.directory'); // may run AD sync
+  const canAssign = can(currentUser, 'tickets.assign');
 
   const filteredDepartments = useMemo(() => {
     if (!searchQuery.trim()) return departments;
@@ -218,7 +220,7 @@ export const DepartmentsView = ({ departments: propDepartments, isLoading: propL
           refreshKey={workloadKey}
           currentUser={currentUser}
           onClose={() => setViewingUser(null)}
-          onReassign={(t) => setReassigningTicket(t)}
+          onReassign={canAssign ? (t) => setReassigningTicket(t) : undefined}
         />
       )}
 

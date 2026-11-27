@@ -335,25 +335,27 @@ async function upsertAdUser(adUser, settings, forceRole) {
   return user;
 }
 
-const BASE_ROLE_NAMES = ['admin', 'staff', 'user'];
+const { SYSTEM_ROLE_NAMES, legacyRoleFor } = require('./accessControlService');
 
 // Keep the system base role assignment consistent with user.role. Custom roles
 // granted by administrators are left untouched.
-async function ensureBaseRoleAssignment(userId, roleName) {
-  const role = await prisma.accessRole.findUnique({ where: { name: roleName } });
+// `legacyRole` is the directory-derived category: admin | staff | user.
+// If the user's current system role already fits that category (e.g. an administrator made
+// an ICT officer a Manager or Viewer), it is kept; otherwise the default role is applied.
+async function ensureBaseRoleAssignment(userId, legacyRole) {
+  const current = await prisma.userRole.findMany({
+    where: { userId, role: { isSystem: true } },
+    select: { role: { select: { name: true } } }
+  });
+  const currentNames = current.map(item => item.role.name);
+  if (currentNames.length && legacyRoleFor(currentNames) === legacyRole) return;
+
+  const defaultRoleName = legacyRole === 'admin' ? 'admin' : legacyRole === 'staff' ? 'officer' : 'user';
+  const role = await prisma.accessRole.findUnique({ where: { name: defaultRoleName } });
   if (!role) return;
   await prisma.$transaction([
-    prisma.userRole.deleteMany({
-      where: {
-        userId,
-        role: { name: { in: BASE_ROLE_NAMES.filter(name => name !== roleName) }, isSystem: true }
-      }
-    }),
-    prisma.userRole.upsert({
-      where: { userId_roleId: { userId, roleId: role.id } },
-      update: {},
-      create: { userId, roleId: role.id }
-    })
+    prisma.userRole.deleteMany({ where: { userId, role: { isSystem: true, name: { in: SYSTEM_ROLE_NAMES } } } }),
+    prisma.userRole.create({ data: { userId, roleId: role.id } })
   ]);
 }
 

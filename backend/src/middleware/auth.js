@@ -72,13 +72,14 @@ const authorizeRoles = (...roles) => {
   };
 };
 
-const requireSettingsSection = (action) => async (req, res, next) => {
+// Each settings area has a single "manage" permission (view + update).
+const requireSettingsSection = () => async (req, res, next) => {
   const section = req.query.section;
-  const permissionPrefix = SETTINGS_SECTIONS[section];
-  if (!permissionPrefix) {
+  const permission = SETTINGS_SECTIONS[section];
+  if (!permission) {
     return res.status(403).json({ success: false, message: 'A permitted settings section is required' });
   }
-  return requirePermission(`${permissionPrefix}.${action}`)(req, res, next);
+  return requirePermission(permission)(req, res, next);
 };
 
 const requireSettingsUpdatePermissions = async (req, res, next) => {

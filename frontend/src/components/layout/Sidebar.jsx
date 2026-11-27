@@ -11,24 +11,22 @@ import {
   Bell,
   CheckCircle2
 } from 'lucide-react';
+import { can, SCREENS } from '../../utils/permissions';
 import { NotificationPreferences } from '../settings/NotificationPreferences';
 
 export const Sidebar = ({ activeTab, setActiveTab, currentUser, onLogout, mobileOpen, setMobileOpen }) => {
   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
 
+  // Only screens the person's role allows (see SCREENS in App.jsx).
+  const allowed = new Set(SCREENS.filter(screen => can(currentUser, ...screen.permissions)).map(screen => screen.id));
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'tickets', label: 'All Tickets', icon: Ticket },
     { id: 'departments', label: 'Departments', icon: Building2 },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'knowledgebase', label: 'Knowledge Base', icon: BookOpen },
-  ];
-
-  if (currentUser?.isAdmin || currentUser?.permissions?.some(permission =>
-    permission.startsWith('settings.') && !permission.startsWith('settings.notifications.')
-  )) {
-    navItems.push({ id: 'admin', label: 'Settings', icon: Settings });
-  }
+    { id: 'admin', label: 'Settings', icon: Settings }
+  ].filter(item => allowed.has(item.id));
 
   const userInitials = currentUser?.name
     ? currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)
@@ -63,7 +61,7 @@ export const Sidebar = ({ activeTab, setActiveTab, currentUser, onLogout, mobile
               <img 
                 src="/kuccps-logo.png" 
                 alt="KUCCPS" 
-                className="h-8 w-auto object-contain flex-shrink-0"
+                className="h-11 w-auto object-contain flex-shrink-0"
               />
               <div className="min-w-0">
                 <span className="text-xs font-black tracking-tight text-slate-900 block truncate">
@@ -125,7 +123,7 @@ export const Sidebar = ({ activeTab, setActiveTab, currentUser, onLogout, mobile
               </p>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="px-1.5 py-0.2 text-[9px] font-bold uppercase rounded bg-red-100 text-[#990024]">
-                  {currentUser?.role || 'staff'}
+                  {currentUser?.roles?.[0]?.label || currentUser?.role || 'staff'}
                 </span>
                 <span className="text-[10px] text-slate-400 truncate max-w-[100px]">
                   {currentUser?.email}
@@ -136,7 +134,7 @@ export const Sidebar = ({ activeTab, setActiveTab, currentUser, onLogout, mobile
 
           {/* Bottom Actions Row */}
           <div className="flex items-center gap-1">
-            {currentUser?.permissions?.includes('settings.notifications.view') && <button
+            {<button
               onClick={() => setShowNotificationSettings(true)}
               className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
               title="Notification Settings"
@@ -176,8 +174,8 @@ export const Sidebar = ({ activeTab, setActiveTab, currentUser, onLogout, mobile
             </div>
             <div className="p-6 overflow-y-auto">
               <NotificationPreferences
-                canEdit={currentUser?.permissions?.includes('settings.notifications.update')}
-                canTest={currentUser?.permissions?.includes('settings.notifications.test')}
+                canEdit
+                canTest
               />
             </div>
           </div>

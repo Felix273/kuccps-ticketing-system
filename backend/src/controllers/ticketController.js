@@ -1,6 +1,6 @@
 const { resolveUploadPath, removeUploadFile } = require('../services/uploadStorage');
 const { sendEmail, sendTicketReply } = require('../services/emailService');
-const { createTicketNotification } = require('../services/notificationService');
+const { createTicketNotification, notifyPermissionHolders } = require('../services/notificationService');
 const { auditLog } = require('../middleware/security');
 const {
   ACTIVE_TICKET_STATUSES,
@@ -14,7 +14,9 @@ const {
   isActiveTicketOverdue
 } = require('../services/slaService');
 const prisma = require('../lib/prisma');
-const { normalizePriority, normalizeStatus } = require('../services/ticketEnums');
+const { normalizePriority, normalizeStatus, normalizeCategory } = require('../services/ticketEnums');
+const { EVENTS, recordTicketEvent } = require('../services/ticketActivity');
+const { getPermissionsForUser, userHasPermission } = require('../services/accessControlService');
 const { createTicketWithNumber } = require('../services/ticketNumber');
 const {
   ACTIVE_STATUSES,
@@ -120,7 +122,7 @@ if (priority && !normalizedPriority) {
     // Get system settings for defaults
     const settings = await prisma.systemSettings.findFirst();
     const resolvedPriority = resolvedPriorityInput || normalizePriority(settings ? settings.defaultPriority : null) || 'Medium';
-    const resolvedCategory = cleanText(category, 120) || settings?.defaultCategory || 'General Issues';
+    const resolvedCategory = normalizeCategory(cleanText(category, 120) || settings?.defaultCategory);
     const createdAt = new Date();
     const slaDeadlines = await getConfiguredTicketSlaDeadlines(prisma, resolvedCategory, resolvedPriority, createdAt);
     const ticket = await createTicketWithNumber(ticketNumber => prisma.ticket.create({
@@ -146,8 +148,24 @@ if (priority && !normalizedPriority) {
       include: { department: true }
     }));
     auditLog('ticket.created', { requestId: req.id, ticketNumber: ticket.ticketNumber, email });
+    const expectedResolution = ticket.slaDueAt ? formatDueDate(ticket.slaDueAt) : null;
+    await recordTicketEvent(prisma, {
+      ticketId: ticket.id,
+      field: EVENTS.created,
+      newValue: ticket.ticketNumber,
+      actor: name || email,
+      note: `Received via Google Workspace/public intake${expectedResolution ? `; expected resolution ${expectedResolution}` : ''}`
+    });
+    // Alert the service desk that a new ticket is waiting in the queue.
+    await notifyPermissionHolders({
+      permission: 'tickets.work',
+      ticket,
+      type: 'new_ticket',
+      title: 'New ticket in the queue',
+      message: `${ticket.ticketNumber}: ${ticket.subject}\nFrom: ${email} · ${ticket.category} · ${ticket.priority}${expectedResolution ? `\nExpected resolution: ${expectedResolution}` : ''}`
+    }).catch(error => auditLog('ticket.new_ticket_alert_failed', { requestId: req.id, error: error.message }));
     try {
-      const emailResult = await sendEmail(email, 'ticketCreated', ticket);
+      const emailResult = await sendEmail(email, 'ticketCreated', { ...ticket, expectedResolution });
       if (emailResult.success && emailResult.messageId) {
         await prisma.ticket.update({
           where: { id: ticket.id },
@@ -531,158 +549,276 @@ exports.getTicketById = async (req, res) => {
   }
 };
 
+// Updates a ticket and drives its lifecycle:
+// - Resolving closes the ticket immediately (no waiting for the requester's rating);
+//   a resolution note is required and the rating email is still sent.
+// - On Hold requires a reason and pauses the SLA clock; resuming pushes the deadlines
+//   back by the time spent on hold and tells the requester the new expected date.
+// - Every change is written to the activity log with the officer's name.
 exports.updateTicket = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, priority, assignedToId, departmentId, category, resolution } = req.body;
-    if (status && !VALID_TICKET_STATUSES.has(status)) {
+    const body = req.body || {};
+    const { status, priority, assignedToId, departmentId, category } = body;
+    if (status !== undefined && !VALID_TICKET_STATUSES.has(status)) {
       return res.status(400).json({ success: false, message: 'Invalid ticket status' });
     }
     const normalizedUpdatePriority = priority ? normalizePriority(priority) : null;
     if (priority && !normalizedUpdatePriority) {
       return res.status(400).json({ success: false, message: 'Invalid ticket priority' });
     }
-    const userId = req.user?.id;
+    const textFields = ['resolutionNotes', 'resolution', 'resolutionRecommendations', 'holdReason', 'knowledgeArticleId'];
+    if (textFields.some(field => body[field] != null && typeof body[field] !== 'string')) {
+      return res.status(400).json({ success: false, message: 'Resolution and hold details must be text' });
+    }
+
+    const actor = req.user;
     const existing = await prisma.ticket.findUnique({ where: { id } });
     if (!existing) {
       return res.status(404).json({ success: false, message: 'Ticket not found' });
     }
-    if (status && !isValidTicketStatusTransition(existing.status, status)) {
+
+    const isActive = ACTIVE_STATUSES.includes(existing.status);
+    const wantsResolve = Boolean(status) && ['Resolved', 'Closed'].includes(status) && isActive;
+
+    // Permission checks for this specific change.
+    const permissions = new Set(await getPermissionsForUser(actor.id));
+    const wantsReopen = status === 'Open' && ['Resolved', 'Closed'].includes(existing.status);
+    const changesAssignee = assignedToId !== undefined && assignedToId !== existing.assignedToId;
+    const isSelfClaim = changesAssignee && assignedToId === actor.id && !existing.assignedToId;
+    const changesWork = (status !== undefined && !wantsReopen) || priority !== undefined ||
+      category !== undefined || departmentId !== undefined;
+    const missing = [];
+    if (wantsReopen && !permissions.has('tickets.reopen')) missing.push('reopen tickets');
+    if (changesAssignee && !isSelfClaim && !permissions.has('tickets.assign')) missing.push('assign tickets to others');
+    if ((changesWork || isSelfClaim) && !permissions.has('tickets.work')) missing.push('work on tickets');
+    if (missing.length) {
+      return res.status(403).json({ success: false, message: `You do not have permission to ${missing.join(' or ')}` });
+    }
+    if (status && !wantsResolve && !isValidTicketStatusTransition(existing.status, status)) {
       return res.status(400).json({
         success: false,
         message: `Cannot change ticket status from ${existing.status} to ${status}`
       });
     }
+
+    // Resolution record (required when resolving).
+    const resolutionNotes = cleanText(body.resolutionNotes ?? body.resolution, 10000);
+    if (wantsResolve && resolutionNotes.length < 10) {
+      return res.status(400).json({ success: false, message: 'Describe how the issue was resolved (at least 10 characters)' });
+    }
+    let effectiveness = null;
+    if (body.resolutionEffectiveness != null && body.resolutionEffectiveness !== '') {
+      effectiveness = Number(body.resolutionEffectiveness);
+      if (!Number.isInteger(effectiveness) || effectiveness < 1 || effectiveness > 5) {
+        return res.status(400).json({ success: false, message: 'Solution effectiveness must be between 1 and 5' });
+      }
+    }
+    if (body.resolutionReusable != null && typeof body.resolutionReusable !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'resolutionReusable must be true or false' });
+    }
+    let knowledgeArticle = null;
+    if (wantsResolve && body.knowledgeArticleId) {
+      knowledgeArticle = await prisma.knowledgeArticle.findFirst({
+        where: { id: body.knowledgeArticleId, status: 'published', isArchived: false },
+        select: { id: true, title: true, excerpt: true, resolution: true, slug: true }
+      });
+      if (!knowledgeArticle) {
+        return res.status(400).json({ success: false, message: 'Selected knowledge article is not published' });
+      }
+    }
+
+    const holdReason = cleanText(body.holdReason, 2000);
+    if (status === 'OnHold' && existing.status !== 'OnHold' && holdReason.length < 5) {
+      return res.status(400).json({ success: false, message: 'Give a reason for putting the ticket on hold' });
+    }
+
+    const now = new Date();
     const updateData = {};
-    const historyEntries = [];
-    if (status && status !== existing.status) {
-      updateData.status = status;
-      historyEntries.push({ field: 'status', oldValue: existing.status, newValue: status });
-      if ((status === 'Resolved' || status === 'Closed') && !existing.resolutionTime) {
-        const resolvedAt = new Date();
-        updateData.resolutionTime = Math.floor((resolvedAt - new Date(existing.createdAt)) / 60000);
-        if (!existing.firstRespondedAt) {
-          updateData.firstRespondedAt = resolvedAt;
-          updateData.responseTime = updateData.resolutionTime;
+    const events = [];
+    const targetStatus = wantsResolve ? 'Closed' : status;
+
+    // Leaving On Hold: push deadlines back by the time spent on hold.
+    let deadlinesShifted = false;
+    if (existing.status === 'OnHold' && targetStatus && targetStatus !== 'OnHold' && existing.onHoldSince) {
+      const heldMs = Math.max(0, now - new Date(existing.onHoldSince));
+      const shift = date => (date ? new Date(new Date(date).getTime() + heldMs) : date);
+      if (!existing.firstRespondedAt) updateData.responseDueAt = shift(existing.responseDueAt);
+      updateData.slaDueAt = shift(existing.slaDueAt);
+      updateData.slaEscalationAt = shift(existing.slaEscalationAt);
+      updateData.totalHoldMinutes = existing.totalHoldMinutes + Math.round(heldMs / 60000);
+      updateData.onHoldSince = null;
+      deadlinesShifted = heldMs >= 60000;
+      events.push({
+        field: EVENTS.status,
+        oldValue: 'OnHold',
+        newValue: wantsResolve ? 'Resumed' : targetStatus,
+        note: `Resumed after ${formatDuration(heldMs)} on hold${deadlinesShifted ? '; SLA deadlines extended accordingly' : ''}`
+      });
+    }
+
+    if (targetStatus && targetStatus !== existing.status) {
+      updateData.status = targetStatus;
+      if (targetStatus === 'OnHold') {
+        updateData.onHoldSince = now;
+        updateData.holdReason = holdReason;
+        events.push({ field: EVENTS.status, oldValue: existing.status, newValue: 'OnHold', note: `On hold: ${holdReason}` });
+      } else if (wantsResolve) {
+        updateData.resolvedAt = now;
+        updateData.closedAt = now;
+        updateData.resolutionNotes = resolutionNotes;
+        updateData.resolutionEffectiveness = effectiveness;
+        updateData.resolutionReusable = body.resolutionReusable ?? null;
+        updateData.resolutionRecommendations = cleanText(body.resolutionRecommendations, 5000) || null;
+        updateData.knowledgeArticleId = knowledgeArticle?.id || null;
+        if (!existing.resolutionTime) {
+          updateData.resolutionTime = Math.floor((now - new Date(existing.createdAt)) / 60000) - (updateData.totalHoldMinutes ?? existing.totalHoldMinutes);
+          if (!existing.firstRespondedAt) {
+            updateData.firstRespondedAt = now;
+            updateData.responseTime = updateData.resolutionTime;
+          }
         }
-      }
-      if (status === 'Resolved') {
-        updateData.resolvedAt = new Date();
-      }
-      if (status === 'Closed') {
-        updateData.closedAt = new Date();
-        if (!existing.resolvedAt) updateData.resolvedAt = new Date();
-      }
-      if (status === 'Open' || status === 'InProgress') {
+        events.push({ field: EVENTS.status, oldValue: existing.status, newValue: 'Resolved', note: resolutionNotes });
+        events.push({ field: EVENTS.status, oldValue: 'Resolved', newValue: 'Closed', note: 'Closed automatically on resolution' });
+      } else if (targetStatus === 'Open' && ['Resolved', 'Closed'].includes(existing.status)) {
+        // Reopen: back to the officer who handled it (In Progress), or to the queue if it
+        // never had one. A fresh Service Charter deadline starts now, so the ticket is not
+        // instantly overdue and escalated.
+        updateData.status = existing.assignedToId ? 'InProgress' : 'Open';
         updateData.resolvedAt = null;
         updateData.closedAt = null;
+        updateData.slaWarningSentAt = null;
+        updateData.slaEscalatedAt = null;
+        updateData.slaBreached = false;
+        const fresh = await getConfiguredTicketSlaDeadlines(prisma, existing.category, existing.priority, now).catch(() => null);
+        if (fresh) {
+          updateData.slaDueAt = fresh.slaDueAt;
+          updateData.slaEscalationAt = fresh.slaEscalationAt;
+        }
+        events.push({ field: EVENTS.status, oldValue: existing.status, newValue: 'Reopened', note: cleanText(body.note, 1000) || null });
+      } else if (existing.status !== 'OnHold') {
+        events.push({ field: EVENTS.status, oldValue: existing.status, newValue: targetStatus });
       }
     }
+
     if (normalizedUpdatePriority && normalizedUpdatePriority !== existing.priority) {
       updateData.priority = normalizedUpdatePriority;
-      historyEntries.push({ field: 'priority', oldValue: existing.priority, newValue: normalizedUpdatePriority });
+      events.push({ field: EVENTS.priority, oldValue: existing.priority, newValue: normalizedUpdatePriority });
     }
+
+    let assignee = null;
     if (assignedToId !== undefined && assignedToId !== existing.assignedToId) {
       if (assignedToId) {
-        const assignee = await prisma.user.findUnique({
+        assignee = await prisma.user.findUnique({
           where: { id: assignedToId },
-          select: { id: true, role: true }
+          select: { id: true, name: true, email: true, role: true }
         });
-        if (!assignee || !['staff', 'admin'].includes(assignee.role)) {
-          return res.status(400).json({ success: false, message: 'Ticket can only be claimed by ICT staff or administrators' });
+        if (!assignee || !(await userHasPermission(assignee.id, 'tickets.work'))) {
+          return res.status(400).json({ success: false, message: 'Tickets can only be assigned to officers who can work on tickets' });
         }
       }
       updateData.assignedToId = assignedToId || null;
-      historyEntries.push({ field: 'assignedTo', oldValue: existing.assignedToId, newValue: assignedToId });
+      const isClaim = assignee && assignee.id === actor.id && !existing.assignedToId;
+      events.push({
+        field: isClaim ? EVENTS.claimed : EVENTS.assigned,
+        oldValue: existing.assignedToId || '',
+        newValue: assignee ? assignee.name : 'Unassigned',
+        note: existing.assignedToId && assignee ? 'Reassigned' : null
+      });
       if (assignedToId && existing.status === 'Open' && status === undefined) {
         updateData.status = 'InProgress';
-        historyEntries.push({ field: 'status', oldValue: existing.status, newValue: 'InProgress' });
+        events.push({ field: EVENTS.status, oldValue: 'Open', newValue: 'InProgress' });
       }
     }
+
     if (departmentId && departmentId !== existing.departmentId) {
-      const departmentExists = await prisma.department.findUnique({
+      const department = await prisma.department.findUnique({
         where: { id: departmentId },
-        select: { id: true }
+        select: { id: true, name: true }
       });
-      if (!departmentExists) {
+      if (!department) {
         return res.status(400).json({ success: false, message: 'Selected department does not exist' });
       }
       updateData.departmentId = departmentId;
-      historyEntries.push({ field: 'department', oldValue: existing.departmentId, newValue: departmentId });
+      events.push({ field: EVENTS.department, oldValue: existing.departmentId || '', newValue: department.name });
     }
+
     if (category !== undefined) {
-      const safeCategory = cleanText(category, 120);
-      if (!safeCategory) {
+      if (typeof category !== 'string' || !category.trim()) {
         return res.status(400).json({ success: false, message: 'Category cannot be empty' });
       }
+      const safeCategory = normalizeCategory(category);
       if (safeCategory !== existing.category) {
         updateData.category = safeCategory;
-        historyEntries.push({ field: 'category', oldValue: existing.category, newValue: safeCategory });
+        events.push({ field: EVENTS.category, oldValue: existing.category, newValue: safeCategory });
       }
     }
-    if ((updateData.status || status) === 'Open') {
+
+    if ((updateData.status || status) === 'Open' && existing.assignedToId && assignedToId === undefined) {
       updateData.assignedToId = null;
-      if (existing.assignedToId) {
-        historyEntries.push({ field: 'assignedTo', oldValue: existing.assignedToId, newValue: '' });
-      }
+      events.push({ field: EVENTS.assigned, oldValue: existing.assignedToId, newValue: 'Unassigned', note: 'Returned to the queue' });
     }
+
+    // Recompute the breach flag from the (possibly shifted) deadlines.
     if (existing.slaDueAt || existing.responseDueAt) {
-      const currentTime = new Date();
       const nextStatus = updateData.status || existing.status;
       const firstRespondedAt = updateData.firstRespondedAt || existing.firstRespondedAt;
-      const responseBreached = existing.responseDueAt && (
-        firstRespondedAt
-          ? new Date(firstRespondedAt) > new Date(existing.responseDueAt)
-          : currentTime > new Date(existing.responseDueAt)
+      const responseDueAt = updateData.responseDueAt !== undefined ? updateData.responseDueAt : existing.responseDueAt;
+      const slaDueAt = updateData.slaDueAt !== undefined ? updateData.slaDueAt : existing.slaDueAt;
+      const isRunning = ['Open', 'InProgress'].includes(nextStatus);
+      const responseBreached = responseDueAt && (
+        firstRespondedAt ? new Date(firstRespondedAt) > new Date(responseDueAt) : isRunning && now > new Date(responseDueAt)
       );
-      const resolvedAt = updateData.resolvedAt || existing.resolvedAt || (nextStatus === 'Closed' ? updateData.closedAt : null);
-      const resolutionBreached = existing.slaDueAt && (
-        resolvedAt
-          ? new Date(resolvedAt) > new Date(existing.slaDueAt)
-          : ACTIVE_TICKET_STATUSES.has(nextStatus) && currentTime > new Date(existing.slaDueAt)
+      const resolvedAt = updateData.resolvedAt !== undefined ? updateData.resolvedAt : existing.resolvedAt;
+      const resolutionBreached = slaDueAt && (
+        resolvedAt ? new Date(resolvedAt) > new Date(slaDueAt) : isRunning && now > new Date(slaDueAt)
       );
-      updateData.slaBreached = Boolean(responseBreached || resolutionBreached);
+      // A reopened ticket starts a new SLA cycle (slaBreached was reset above).
+      const priorBreach = updateData.slaBreached === false ? false : existing.slaBreached;
+      updateData.slaBreached = Boolean(priorBreach || responseBreached || resolutionBreached);
     }
-    // resolution field not in schema, skipping
-    const ticket = await prisma.ticket.update({
-      where: { id },
-      data: updateData,
-      include: { department: true, assignedTo: { select: { id: true, name: true, email: true } } }
+
+    const ticket = await prisma.$transaction(async tx => {
+      const updated = await tx.ticket.update({
+        where: { id },
+        data: updateData,
+        include: { department: true, assignedTo: { select: { id: true, name: true, email: true } } }
+      });
+      for (const event of events) {
+        await recordTicketEvent(tx, { ticketId: id, actor, ...event });
+      }
+      return updated;
     });
-    if (historyEntries.length > 0 && userId) {
-      await Promise.all(historyEntries.map(entry =>
-        prisma.ticketHistory.create({
-          data: { ticketId: id, changedBy: userId, field: entry.field, oldValue: entry.oldValue || '', newValue: entry.newValue || '' }
-        })
-      ));
-    }
-    if (status && status !== existing.status) {
-      const templateType = status === 'Resolved' ? 'ticketResolved' : 'ticketUpdated';
-      await sendEmail(ticket.requesterEmail, templateType, {
-        ...ticket,
-        emailMessageId: existing.emailMessageId,
-        resolutionComment: resolution || ''
+
+    // A reusable fix becomes a knowledge-base draft for admin review.
+    let draftArticle = null;
+    if (wantsResolve && body.resolutionReusable === true && !knowledgeArticle) {
+      draftArticle = await createKnowledgeDraftFromTicket(ticket, actor).catch(error => {
+        console.error('Knowledge draft creation failed:', error.message);
+        return null;
       });
-    } else if (assignedToId !== undefined && assignedToId !== existing.assignedToId) {
-      await sendEmail(ticket.requesterEmail, 'ticketUpdated', {
-        ...ticket,
-        emailMessageId: existing.emailMessageId,
-        comment: `Your ticket has been claimed by ${ticket.assignedTo?.name || 'a support agent'}.`
-      });
+      if (draftArticle) {
+        await notifyPermissionHolders({
+          permission: 'knowledge.publish',
+          excludeUserIds: [actor.id],
+          type: 'knowledge_review',
+          title: 'Knowledge article awaiting review',
+          message: `"${draftArticle.title}" was drafted from resolved ticket ${ticket.ticketNumber} by ${actor.name || 'an ICT officer'}.`,
+          dedupeKey: `kb-review-${draftArticle.id}`
+        }).catch(() => null);
+      }
     }
+
+    await notifyRequesterOfChange({ existing, ticket, actor, wantsResolve, holdReason, deadlinesShifted, assignee, knowledgeArticle });
 
     const notificationRecipients = new Set();
     if (ticket.status !== existing.status) {
       if (existing.createdById) notificationRecipients.add(existing.createdById);
-      const newlyAssignedTo = assignedToId !== undefined && assignedToId !== existing.assignedToId
-        ? assignedToId
-        : null;
+      const newlyAssignedTo = assignedToId !== undefined && assignedToId !== existing.assignedToId ? assignedToId : null;
       if (newlyAssignedTo) notificationRecipients.delete(newlyAssignedTo);
-      if (ticket.assignedToId && ticket.assignedToId !== newlyAssignedTo) {
-        notificationRecipients.add(ticket.assignedToId);
-      }
+      if (ticket.assignedToId && ticket.assignedToId !== newlyAssignedTo) notificationRecipients.add(ticket.assignedToId);
       await Promise.all([...notificationRecipients]
-        .filter(recipientId => recipientId !== userId)
+        .filter(recipientId => recipientId !== actor.id)
         .map(recipientId => createTicketNotification({
           userId: recipientId,
           ticket,
@@ -691,8 +827,19 @@ exports.updateTicket = async (req, res) => {
           message: `${ticket.ticketNumber}: status changed from ${existing.status} to ${ticket.status}`
         })));
     }
+    // A reopened ticket with no officer goes back to the queue: alert the service desk.
+    if (['Resolved', 'Closed'].includes(existing.status) && ticket.status === 'Open' && !ticket.assignedToId) {
+      await notifyPermissionHolders({
+        permission: 'tickets.work',
+        excludeUserIds: [actor.id],
+        ticket,
+        type: 'new_ticket',
+        title: 'Reopened ticket back in the queue',
+        message: `${ticket.ticketNumber}: ${ticket.subject} was reopened by ${actor.name || 'an officer'} and needs to be claimed.`
+      }).catch(() => null);
+    }
 
-    if (assignedToId && assignedToId !== existing.assignedToId && assignedToId !== userId) {
+    if (assignedToId && assignedToId !== existing.assignedToId && assignedToId !== actor.id) {
       await createTicketNotification({
         userId: assignedToId,
         ticket,
@@ -701,12 +848,95 @@ exports.updateTicket = async (req, res) => {
         message: `${ticket.ticketNumber}: ${ticket.subject}`
       });
     }
-    return res.json({ success: true, ticket: decorateTicket(ticket) });
+    return res.json({
+      success: true,
+      ticket: decorateTicket(ticket),
+      ...(draftArticle ? { knowledgeDraft: { id: draftArticle.id, title: draftArticle.title } } : {})
+    });
   } catch (error) {
     console.error('Error updating ticket:', error);
     return res.status(500).json({ success: false, message: 'Failed to update ticket' });
   }
 };
+
+function formatDuration(ms) {
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return `${minutes} minute(s)`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} hour(s) ${minutes % 60} minute(s)`;
+  return `${Math.floor(hours / 24)} day(s) ${hours % 24} hour(s)`;
+}
+
+async function createKnowledgeDraftFromTicket(ticket, actor) {
+  const title = ticket.subject.slice(0, 180);
+  const slug = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'resolution'}-${ticket.ticketNumber.toLowerCase()}`;
+  return prisma.knowledgeArticle.create({
+    data: {
+      title,
+      slug,
+      category: ticket.category,
+      excerpt: `Draft from resolved ticket ${ticket.ticketNumber}`,
+      content: ticket.resolutionNotes || '',
+      symptoms: ticket.description.slice(0, 5000),
+      resolution: ticket.resolutionNotes,
+      escalation: ticket.resolutionRecommendations || null,
+      status: 'pending_review',
+      authorId: actor.id,
+      authorName: actor.name || 'ICT Officer',
+      authorRole: actor.role || 'staff'
+    },
+    select: { id: true, title: true }
+  });
+}
+
+// Requester emails for each lifecycle step, stating what happens next and when.
+async function notifyRequesterOfChange({ existing, ticket, actor, wantsResolve, holdReason, deadlinesShifted, assignee, knowledgeArticle }) {
+  const base = { ...ticket, emailMessageId: existing.emailMessageId };
+  const expected = ticket.slaDueAt ? `Expected resolution: ${formatDueDate(ticket.slaDueAt)}.` : '';
+
+  if (wantsResolve) {
+    const tip = knowledgeArticle
+      ? `\n\nTip to avoid or fix this next time — "${knowledgeArticle.title}":\n${knowledgeArticle.excerpt || (knowledgeArticle.resolution || '').slice(0, 600)}`
+      : '';
+    return sendEmail(ticket.requesterEmail, 'ticketResolved', {
+      ...base,
+      resolutionComment: `${ticket.resolutionNotes}${tip}\n\nThis ticket is now closed. If the problem continues, reply to this email and an ICT officer will review your message and reopen the ticket if needed. Please rate our service using the buttons below.`
+    });
+  }
+
+  let comment = null;
+  if (ticket.status === 'OnHold' && existing.status !== 'OnHold') {
+    comment = `Your ticket has been placed on hold.\nReason: ${holdReason}\n\nWhat we need from you: if the reason above asks for information or action from you, please reply to this email. The resolution timer is paused while the ticket is on hold.`;
+  } else if (existing.status === 'OnHold' && ticket.status !== 'OnHold') {
+    comment = `Work on your ticket has resumed. ${deadlinesShifted ? 'Because it was on hold, the expected resolution time has been updated. ' : ''}${expected}`;
+  } else if (['Resolved', 'Closed'].includes(existing.status) && ACTIVE_STATUSES.includes(ticket.status)) {
+    comment = `Your ticket has been reopened and will be worked on again${ticket.assignedTo?.name ? ` by ${ticket.assignedTo.name}` : ''}. ${expected}`;
+  } else if (assignee && assignee.id !== existing.assignedToId) {
+    comment = `Your ticket has been assigned to ${assignee.name}, who is now investigating it. ${expected}\nNo action is required from you unless the officer contacts you.`;
+  } else if (ticket.status === 'InProgress' && existing.status !== 'InProgress') {
+    comment = `Your ticket is being investigated. ${expected}`;
+  } else if (ticket.slaDueAt && existing.slaDueAt && new Date(ticket.slaDueAt).getTime() !== new Date(existing.slaDueAt).getTime()) {
+    comment = `The expected resolution time for your ticket has changed. ${expected}`;
+  }
+
+  if (!comment) return null;
+  return sendEmail(ticket.requesterEmail, 'ticketUpdated', { ...base, comment });
+}
+
+function formatDueDate(date) {
+  return new Date(date).toLocaleString('en-GB', {
+    timeZone: process.env.TICKET_TIMEZONE || 'Africa/Nairobi',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }) + ' (EAT)';
+}
+
+exports.formatDueDate = formatDueDate;
+
 
 exports.escalateTicket = async (req, res) => {
   try {
@@ -727,8 +957,8 @@ exports.escalateTicket = async (req, res) => {
 
     if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found' });
     if (!targetUser) return res.status(404).json({ success: false, message: 'Target officer not found' });
-    if (!['staff', 'admin'].includes(targetUser.role)) {
-      return res.status(400).json({ success: false, message: 'Escalation target must be ICT staff or an administrator' });
+    if (!(await userHasPermission(targetUser.id, 'tickets.work'))) {
+      return res.status(400).json({ success: false, message: 'Escalation target must be an officer who can work on tickets' });
     }
     if (['Resolved', 'Closed'].includes(ticket.status)) {
       return res.status(400).json({ success: false, message: 'Resolved or closed tickets cannot be escalated' });
@@ -745,14 +975,13 @@ exports.escalateTicket = async (req, res) => {
       include: { department: true, assignedTo: { select: { id: true, name: true, email: true } }, createdBy: { select: { id: true, name: true, email: true } } }
     });
 
-    await prisma.ticketHistory.create({
-      data: {
-        ticketId: id,
-        changedBy: userId || '',
-        field: 'escalation',
-        oldValue: ticket.assignedToId || '',
-        newValue: `${type}:${targetUser.name}${safeReason ? ` - ${safeReason}` : ''}`
-      }
+    await recordTicketEvent(prisma, {
+      ticketId: id,
+      field: EVENTS.escalation,
+      oldValue: ticket.assignedToId || '',
+      newValue: `${type === 'vertical' ? 'Vertical' : 'Horizontal'} escalation to ${targetUser.name}`,
+      actor: req.user,
+      note: safeReason || null
     });
 
     await prisma.comment.create({
@@ -763,10 +992,12 @@ exports.escalateTicket = async (req, res) => {
         content: `Escalated ${type} to ${targetUser.name}.${safeReason ? ` Reason: ${safeReason}` : ''}`
       }
     });
-await sendEmail(targetUser.email, 'ticketUpdated', {
+    // The target officer is alerted (in-app + email, per their escalation alert setting) below.
+    // Keep the requester informed that their ticket has been escalated.
+    await sendEmail(updated.requesterEmail, 'ticketUpdated', {
       ...updated,
       emailMessageId: ticket.emailMessageId,
-      comment: `A ticket has been escalated to you: ${updated.ticketNumber} - ${updated.subject}`
+      comment: `Your ticket has been escalated to ${targetUser.name} for further attention.${updated.slaDueAt ? ` Expected resolution: ${formatDueDate(updated.slaDueAt)}.` : ''}\nNo action is required from you.`
     });
 
     if (targetUser.id !== userId) {
@@ -902,14 +1133,11 @@ exports.addAttachment = async (req, res) => {
         }
       });
 
-      await tx.ticketHistory.create({
-        data: {
-          ticketId: id,
-          field: 'attachment',
-          oldValue: '',
-          newValue: originalName,
-          changedBy: req.user?.id || ''
-        }
+      await recordTicketEvent(tx, {
+        ticketId: id,
+        field: EVENTS.attachment,
+        newValue: originalName,
+        actor: req.user
       });
 
       return savedAttachment;
@@ -983,7 +1211,7 @@ exports.getStatistics = async (req, res) => {
       prisma.ticket.count({ where: { priority: { in: ['VeryHigh', 'Critical'] }, status: { notIn: ['Resolved', 'Closed'] } } }),
       prisma.ticket.count({
         where: {
-          status: { in: [...ACTIVE_TICKET_STATUSES] },
+          status: { in: ['Open', 'InProgress'] },
           OR: [
             { slaDueAt: { lt: new Date() }, resolvedAt: null },
             { responseDueAt: { lt: new Date() }, firstRespondedAt: null }

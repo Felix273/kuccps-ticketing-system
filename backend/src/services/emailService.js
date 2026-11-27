@@ -9,7 +9,17 @@ const {
   removeLegacyCsatSection,
   renderCsatLinks
 } = require('./csatService');
-const { normalizePriority, normalizeStatus } = require('./ticketEnums');
+const { normalizePriority, normalizeStatus, normalizeCategory } = require('./ticketEnums');
+const { EVENTS, recordTicketEvent } = require('./ticketActivity');
+// notificationService imports this module, so it is required lazily to avoid a cycle.
+const createTicketNotification = (...args) => require('./notificationService').createTicketNotification(...args);
+
+function formatExpectedDate(date) {
+  return new Date(date).toLocaleString('en-GB', {
+    timeZone: process.env.TICKET_TIMEZONE || 'Africa/Nairobi',
+    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  }) + ' (EAT)';
+}
 const { createTicketWithNumber } = require('./ticketNumber');
 const { escapeHtml, textToHtml, safeColor } = require('../utils/html');
 const { encryptSecret, withDecryptedSecrets } = require('./secretBox');
@@ -196,9 +206,14 @@ async function sendEmail(to, templateType, data) {
       replacements[`[${legacyToken}]`] = textToHtml(raw);
       replacements[`{{${camelToken}}}`] = textToHtml(raw);
     }
+    const secondaryColor = safeColor(settings.secondaryColor, '#d20001');
     Object.assign(replacements, {
       '{{primaryColor}}': primaryColor,
-      '{{secondaryColor}}': safeColor(settings.secondaryColor, '#d20001'),
+      '{{secondaryColor}}': secondaryColor,
+      '[PRIMARY_COLOR]': primaryColor,
+      '[SECONDARY_COLOR]': secondaryColor,
+      '{{expectedResolution}}': escapeHtml(data.expectedResolution || ''),
+      '[EXPECTED_RESOLUTION]': escapeHtml(data.expectedResolution || ''),
       '{{csatLinks}}': templateType === 'ticketResolved' && data.id && data.requesterEmail
         ? renderCsatLinks(data, primaryColor)
         : '',
@@ -223,8 +238,19 @@ async function sendEmail(to, templateType, data) {
     for (const [placeholder, value] of Object.entries(subjectReplacements)) {
       subject = replaceAllLiteral(subject, placeholder, value);
     }
+    const templateHasExpectedDate = /\{\{expectedResolution\}\}|\[EXPECTED_RESOLUTION\]/.test(html);
     for (const [placeholder, value] of Object.entries(replacements)) {
       html = replaceAllLiteral(html, placeholder, value);
+    }
+
+    // The acknowledgement always states the Service Charter resolution target, even if an
+    // administrator's template does not include the {{expectedResolution}} placeholder.
+    if (data.expectedResolution && !templateHasExpectedDate) {
+      const notice = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0"><tr><td style="padding:14px 16px;border:1px solid #e4e4e7;border-left:4px solid ${primaryColor};border-radius:6px;font-family:Arial,sans-serif;font-size:13px;color:#18181b">` +
+        `<strong>Expected resolution:</strong> ${escapeHtml(data.expectedResolution)}<br>` +
+        '<span style="color:#71717a">Based on the ICT Service Charter. We will email you if this changes. No action is required from you unless an officer contacts you.</span>' +
+        '</td></tr></table>';
+      html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${notice}</body>`) : `${html}${notice}`;
     }
 
     if (templateType === 'ticketResolved' && data.id && data.requesterEmail) {
@@ -248,9 +274,12 @@ async function sendEmail(to, templateType, data) {
     const supportAddress = settings.supportEmail || authenticatedSender;
     const noReplyAddress = settings.noreplyEmail || supportAddress;
     const fromAddress = authenticatedSender || supportAddress;
+    // Test mode: every email goes to the ICT test mailbox instead of real users.
+    const testAddress = settings.emailTestMode && settings.emailTestAddress ? settings.emailTestAddress : null;
+    if (testAddress) subject = `[TEST → ${to}] ${subject}`;
     const mailOptions = {
       from: { name: settings.emailFromName || 'KUCCPS IT Support', address: fromAddress },
-      to: to,
+      to: testAddress || to,
       subject: subject,
       html: html,
       ...(noReplyAddress ? { replyTo: noReplyAddress } : {}),
@@ -394,7 +423,37 @@ async function processIncomingEmail(emailData) {
 
     // A reply is accepted only from the ticket's requester or ICT staff. Anyone else
     // quoting a ticket number gets a new ticket instead of writing into someone else's.
-    if (ticket && (ticket.requesterEmail.toLowerCase() === from || senderIsStaff)) {
+    const isRequester = Boolean(ticket) && ticket.requesterEmail.toLowerCase() === from;
+    const isFinished = Boolean(ticket) && ['Resolved', 'Closed'].includes(ticket.status);
+    const reopenWindowMs = (settings.reopenWindowDays ?? 14) * 24 * 60 * 60 * 1000;
+    const finishedAt = ticket?.closedAt || ticket?.resolvedAt;
+    const withinReopenWindow = !finishedAt || Date.now() - new Date(finishedAt).getTime() <= reopenWindowMs;
+
+    // A requester replying to a long-closed ticket gets a new ticket instead of a reopen.
+    if (ticket && (senderIsStaff || (isRequester && (!isFinished || withinReopenWindow)))) {
+      if (isRequester && isFinished) {
+        // Team decision: a requester's reply never reopens a closed ticket. The reply is kept
+        // on the ticket and the officer is alerted so they can reopen it if needed.
+        await recordTicketEvent(prisma, {
+          ticketId: ticket.id,
+          field: EVENTS.emailReply,
+          newValue: 'Requester replied after closure',
+          actor: { id: from, name: `Requester (${from})` },
+          note: body.slice(0, 500)
+        });
+        const recipients = ticket.assignedToId
+          ? [ticket.assignedToId]
+          : (await prisma.user.findMany({ where: { role: 'admin' }, select: { id: true } })).map(user => user.id);
+        for (const userId of recipients) {
+          await createTicketNotification({
+            userId,
+            ticket,
+            type: 'comment',
+            title: 'Requester replied to a closed ticket',
+            message: `${ticket.ticketNumber}: review the reply and reopen the ticket if the issue persists`
+          }).catch(() => null);
+        }
+      }
       if (senderIsStaff && !ticket.firstRespondedAt) {
         const respondedAt = new Date();
         await prisma.ticket.update({
@@ -426,12 +485,28 @@ async function processIncomingEmail(emailData) {
         await prisma.processedEmail.update({ where: { messageId }, data: { ticketId: ticket.id } }).catch(() => null);
       }
 
+      // Tell the officer the requester replied (closed tickets are alerted above).
+      if (isRequester && !isFinished) {
+        const { notifyPermissionHolders } = require('./notificationService');
+        const alert = {
+          ticket,
+          type: 'comment',
+          title: 'Requester replied',
+          message: `${ticket.ticketNumber}: ${body.slice(0, 300)}`
+        };
+        if (ticket.assignedToId) {
+          await createTicketNotification({ userId: ticket.assignedToId, ...alert }).catch(() => null);
+        } else {
+          await notifyPermissionHolders({ permission: 'tickets.assign', ...alert }).catch(() => null);
+        }
+      }
+
       console.log(`Added email reply to ticket ${ticket.ticketNumber}`);
       return { success: true, ticketNumber: ticket.ticketNumber, isReply: true };
     }
 
     const createdAt = new Date();
-    const category = settings.defaultCategory || 'General Issues';
+    const category = normalizeCategory(settings.defaultCategory);
     const priority = normalizePriority(settings.defaultPriority) || 'Medium';
     const slaDeadlines = await getConfiguredTicketSlaDeadlines(prisma, category, priority, createdAt);
     const requesterName = String(parsed.from?.value?.[0]?.name || '').trim().slice(0, 160) || null;
@@ -462,13 +537,30 @@ async function processIncomingEmail(emailData) {
       await prisma.processedEmail.update({ where: { messageId }, data: { ticketId: newTicket.id } }).catch(() => null);
     }
 
-    const emailResult = await sendEmail(from, 'ticketCreated', newTicket);
+    const expectedResolution = newTicket.slaDueAt ? formatExpectedDate(newTicket.slaDueAt) : null;
+    await recordTicketEvent(prisma, {
+      ticketId: newTicket.id,
+      field: EVENTS.created,
+      newValue: newTicket.ticketNumber,
+      actor: { id: from, name: requesterName || from },
+      note: `Received by email${expectedResolution ? `; expected resolution ${expectedResolution}` : ''}`
+    });
+    const emailResult = await sendEmail(from, 'ticketCreated', { ...newTicket, expectedResolution });
     if (!newTicket.emailMessageId && emailResult.success && emailResult.messageId) {
       await prisma.ticket.update({
         where: { id: newTicket.id },
         data: { emailMessageId: emailResult.messageId }
       });
     }
+
+    // Alert the service desk that a new ticket is waiting in the queue.
+    await require('./notificationService').notifyPermissionHolders({
+      permission: 'tickets.work',
+      ticket: newTicket,
+      type: 'new_ticket',
+      title: 'New ticket in the queue',
+      message: `${newTicket.ticketNumber}: ${newTicket.subject}\nFrom: ${from} · ${newTicket.category} · ${newTicket.priority}${expectedResolution ? `\nExpected resolution: ${expectedResolution}` : ''}`
+    }).catch(error => console.error('New ticket alert failed:', error.message));
 
     console.log(`Created new ticket ${newTicket.ticketNumber} from email`);
     return { success: true, ticketNumber: newTicket.ticketNumber, isReply: false };
@@ -478,6 +570,34 @@ async function processIncomingEmail(emailData) {
     console.error('Error processing email:', error.message);
     return { success: false, error: error.message };
   }
+}
+
+// IMAP connection settings: Settings → Email when inbound email is enabled there,
+// otherwise the IMAP_* environment variables. Returns null when neither is configured.
+async function getImapConfig() {
+  clearSettingsCache();
+  const settings = await getSystemSettings();
+  if (settings.imapEnabled && settings.imapHost && settings.imapUser && settings.imapPassword) {
+    const port = settings.imapPort || 993;
+    return {
+      user: settings.imapUser,
+      password: settings.imapPassword,
+      host: settings.imapHost,
+      port,
+      // 993 (IMAPS) is encrypted; 143/3143 are plain IMAP (allowed only outside production).
+      tls: !(process.env.NODE_ENV !== 'production' && [143, 3143].includes(Number(port)))
+    };
+  }
+  if (process.env.IMAP_HOST && process.env.IMAP_USER && process.env.IMAP_PASSWORD) {
+    return {
+      user: process.env.IMAP_USER,
+      password: process.env.IMAP_PASSWORD,
+      host: process.env.IMAP_HOST,
+      port: parseInt(process.env.IMAP_PORT, 10) || 993,
+      tls: String(process.env.IMAP_TLS || 'true').toLowerCase() !== 'false'
+    };
+  }
+  return null;
 }
 
 function readStream(stream) {
@@ -493,7 +613,7 @@ function readStream(stream) {
 // been handled, and reconnect with backoff if the connection drops.
 function startEmailMonitoring() {
   const rejectUnauthorized = String(process.env.IMAP_TLS_REJECT_UNAUTHORIZED || 'true').toLowerCase() !== 'false';
-  const pollMinutes = Math.min(Math.max(parseInt(process.env.EMAIL_POLL_INTERVAL || process.env.IMAP_POLL_INTERVAL, 10) || 5, 1), 59);
+  const envPollMinutes = parseInt(process.env.EMAIL_POLL_INTERVAL || process.env.IMAP_POLL_INTERVAL, 10) || 5;
   let imap = null;
   let processing = false;
   let pendingRun = false;
@@ -554,21 +674,21 @@ function startEmailMonitoring() {
     console.log(`IMAP reconnecting in ${Math.round(reconnectDelayMs / 1000)}s`);
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
-      connect();
+      connect().catch(error => {
+        console.error('IMAP connection setup failed:', error.message);
+        scheduleReconnect();
+      });
     }, reconnectDelayMs);
     reconnectDelayMs = Math.min(reconnectDelayMs * 2, 5 * 60 * 1000);
   }
 
-  function connect() {
-    imap = new Imap({
-      user: process.env.IMAP_USER,
-      password: process.env.IMAP_PASSWORD,
-      host: process.env.IMAP_HOST,
-      port: parseInt(process.env.IMAP_PORT, 10) || 993,
-      tls: String(process.env.IMAP_TLS || 'true').toLowerCase() !== 'false',
-      tlsOptions: { rejectUnauthorized },
-      keepalive: true
-    });
+  async function connect() {
+    const config = await getImapConfig();
+    if (!config) {
+      console.log('Inbound email is not configured; monitoring stopped');
+      return;
+    }
+    imap = new Imap({ ...config, tlsOptions: { rejectUnauthorized }, keepalive: true });
 
     imap.once('ready', () => {
       reconnectDelayMs = 5000;
@@ -594,11 +714,24 @@ function startEmailMonitoring() {
     imap.connect();
   }
 
-  connect();
+  connect().catch(error => {
+    console.error('IMAP connection setup failed:', error.message);
+    scheduleReconnect();
+  });
 
-  // Fallback poll in case IDLE notifications are missed.
-  cron.schedule(`*/${pollMinutes} * * * *`, () => processUnseen());
-  console.log(`✓ Email polling fallback scheduled every ${pollMinutes} minutes`);
+  // Fallback poll in case IDLE notifications are missed, every 'Email polling interval'
+  // minutes from Settings → Email (falls back to EMAIL_POLL_INTERVAL, default 5).
+  let minutesSincePoll = 0;
+  cron.schedule('* * * * *', async () => {
+    minutesSincePoll += 1;
+    const settings = await getSystemSettings().catch(() => null);
+    const interval = Math.min(Math.max(Number(settings?.imapPollInterval) || envPollMinutes, 1), 59);
+    if (minutesSincePoll >= interval) {
+      minutesSincePoll = 0;
+      processUnseen();
+    }
+  });
+  console.log('✓ Email polling fallback scheduled (interval from Settings → Email)');
 
   return { processUnseen };
 }
@@ -613,6 +746,7 @@ module.exports = {
   getEmailTemplates,
   createEmailTransporter,
   clearSettingsCache,
+  getImapConfig,
   htmlToText,
   isAutomatedMessage
 };

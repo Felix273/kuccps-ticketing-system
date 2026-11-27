@@ -1,43 +1,122 @@
-
+// Role-based access control for the ICT service desk.
+//
+// Permissions describe real tasks (work a ticket, assign it, publish an article, manage
+// email settings...). Roles bundle them. Four system roles cover the ICT Directorate:
+//   Administrator  – everything, including roles and system configuration
+//   ICT Manager    – runs the desk: assigns work, reopens, publishes KB, sets SLAs, sees reports
+//   ICT Officer    – handles tickets day to day and contributes to the knowledge base
+//   Viewer         – read-only oversight (e.g. management, audit)
+// plus "Requester" (no system access; people who raise tickets).
+// Administrators can adjust the Manager/Officer/Viewer permission sets or create custom roles.
 
 const prisma = require('../lib/prisma');
 
-const PERMISSIONS = [
-  ['access-control.manage', 'Manage roles, permissions, and user role assignments'],
-  ['settings.organization.view', 'View organization settings'],
-  ['settings.organization.update', 'Update organization settings'],
-  ['settings.email.view', 'View email and IMAP settings'],
-  ['settings.email.update', 'Update email and IMAP settings'],
-  ['settings.tickets.view', 'View ticket and SLA settings'],
-  ['settings.tickets.update', 'Update ticket and SLA settings'],
-  ['settings.ldap.view', 'View Active Directory and LDAP settings'],
-  ['settings.ldap.update', 'Update Active Directory and LDAP settings'],
-  ['settings.templates.view', 'View email templates'],
-  ['settings.templates.create', 'Create email templates'],
-  ['settings.templates.update', 'Update email templates'],
-  ['settings.templates.delete', 'Delete email templates'],
-  ['settings.templates.reset', 'Reset email templates to defaults'],
-  ['settings.forms.view', 'View custom forms in Settings'],
-  ['settings.forms.create', 'Create custom forms'],
-  ['settings.forms.update', 'Update custom forms'],
-  ['settings.forms.delete', 'Delete custom forms'],
-  ['settings.notifications.view', 'View your notification preferences'],
-  ['settings.notifications.update', 'Update your notification preferences'],
-  ['settings.notifications.test', 'Send a test notification to your own account']
-].map(([key, description]) => ({ key, description }));
+const PERMISSION_GROUPS = [
+  {
+    group: 'Tickets',
+    permissions: [
+      ['tickets.view', 'View tickets', 'See the ticket queue, ticket details and conversations'],
+      ['tickets.work', 'Work on tickets', 'Claim tickets, reply, add internal notes and attachments, put on hold, resolve'],
+      ['tickets.assign', 'Assign tickets', 'Assign or reassign tickets to other officers'],
+      ['tickets.escalate', 'Escalate tickets', 'Escalate a ticket to another officer'],
+      ['tickets.reopen', 'Reopen tickets', 'Reopen closed tickets'],
+      ['tickets.export', 'Export tickets', 'Download ticket lists as CSV']
+    ]
+  },
+  {
+    group: 'Knowledge base',
+    permissions: [
+      ['knowledge.contribute', 'Contribute articles', 'Propose articles and upload documents (sent for review)'],
+      ['knowledge.publish', 'Publish & manage articles', 'Approve, edit, archive and delete articles; see search gaps']
+    ]
+  },
+  {
+    group: 'Oversight',
+    permissions: [
+      ['reports.view', 'View dashboards & reports', 'Dashboard, analytics and customer feedback reports'],
+      ['users.view', 'View directory', 'See ICT officers, users and directorates'],
+      ['status.manage', 'Manage service status', 'Publish and update service status issues'],
+      ['audit.view', 'View access audit log', 'See who changed roles and permissions']
+    ]
+  },
+  {
+    group: 'Settings',
+    permissions: [
+      ['settings.organization', 'Organization settings', 'Organization name, branding colours and contact addresses'],
+      ['settings.email', 'Email settings', 'Outgoing/incoming email, test mode and email templates'],
+      ['settings.service-desk', 'Service desk settings', 'Ticket defaults, SLA timelines, escalation and attachment rules'],
+      ['settings.directory', 'Active Directory settings', 'Directory connection and user synchronisation'],
+      ['access.manage', 'Manage roles & access', 'Assign roles and edit role permissions (Administrator only)']
+    ]
+  }
+];
 
+const PERMISSIONS = PERMISSION_GROUPS.flatMap(({ group, permissions }) =>
+  permissions.map(([key, label, description]) => ({ key, label, description, group }))
+);
+const PERMISSION_KEYS = new Set(PERMISSIONS.map(permission => permission.key));
+const RESERVED_ADMIN_PERMISSION = 'access.manage';
+
+const ALL = PERMISSIONS.map(permission => permission.key);
+const SYSTEM_ROLES = [
+  {
+    name: 'admin',
+    label: 'Administrator',
+    description: 'Full control of the system, including roles, access and all settings.',
+    legacyRole: 'admin',
+    permissions: ALL
+  },
+  {
+    name: 'manager',
+    label: 'ICT Manager',
+    description: 'Runs the service desk: assigns and reopens tickets, publishes knowledge, sets SLA rules and sees all reports.',
+    legacyRole: 'staff',
+    permissions: [
+      'tickets.view', 'tickets.work', 'tickets.assign', 'tickets.escalate', 'tickets.reopen', 'tickets.export',
+      'knowledge.contribute', 'knowledge.publish',
+      'reports.view', 'users.view', 'status.manage', 'audit.view',
+      'settings.service-desk'
+    ]
+  },
+  {
+    name: 'officer',
+    label: 'ICT Officer',
+    description: 'Handles tickets day to day and contributes to the knowledge base.',
+    legacyRole: 'staff',
+    permissions: [
+      'tickets.view', 'tickets.work', 'tickets.escalate',
+      'knowledge.contribute',
+      'reports.view', 'users.view', 'status.manage'
+    ]
+  },
+  {
+    name: 'viewer',
+    label: 'Viewer',
+    description: 'Read-only access to tickets, dashboards and reports (e.g. management or audit).',
+    legacyRole: 'staff',
+    permissions: ['tickets.view', 'reports.view', 'users.view', 'audit.view']
+  },
+  {
+    name: 'user',
+    label: 'Requester',
+    description: 'Raises tickets by email or the Gmail add-on. Cannot sign in to this system.',
+    legacyRole: 'user',
+    permissions: []
+  }
+];
+const SYSTEM_ROLE_NAMES = SYSTEM_ROLES.map(role => role.name);
+const ROLE_LABELS = Object.fromEntries(SYSTEM_ROLES.map(role => [role.name, role.label]));
+
+// Settings areas: which permission manages each section and which fields belong to it.
 const SETTINGS_SECTIONS = {
   organization: 'settings.organization',
   email: 'settings.email',
-  tickets: 'settings.tickets',
-  ldap: 'settings.ldap'
+  tickets: 'settings.service-desk',
+  ldap: 'settings.directory'
 };
 
 const SETTINGS_FIELD_SECTIONS = {
   organizationName: 'organization',
-  organizationCode: 'organization',
-  logoUrl: 'organization',
-  faviconUrl: 'organization',
   primaryColor: 'organization',
   secondaryColor: 'organization',
   supportEmail: 'organization',
@@ -56,6 +135,8 @@ const SETTINGS_FIELD_SECTIONS = {
   _newImapPassword: 'email',
   imapEnabled: 'email',
   imapPollInterval: 'email',
+  emailTestMode: 'email',
+  emailTestAddress: 'email',
   ldapEnabled: 'ldap',
   ldapUrl: 'ldap',
   ldapBaseDn: 'ldap',
@@ -77,18 +158,14 @@ const SETTINGS_FIELD_SECTIONS = {
   ldapDefaultRole: 'ldap',
   ldapSyncUsersEnabled: 'ldap',
   ticketNumberPrefix: 'tickets',
-  ticketNumberFormat: 'tickets',
   defaultPriority: 'tickets',
   defaultCategory: 'tickets',
   defaultStatus: 'tickets',
-  googleAddonApiUrl: 'tickets',
-  googleAddonEnabled: 'tickets',
   maxFileSize: 'tickets',
   allowedFileTypes: 'tickets',
-  maintenanceMode: 'tickets',
-  maintenanceMessage: 'tickets',
-  darkModeEnabled: 'organization',
-  contrastMode: 'organization'
+  reopenWindowDays: 'tickets',
+  slaWarningPercent: 'tickets',
+  escalationEmails: 'tickets'
 };
 
 async function getPermissionsForUser(userId, client = prisma) {
@@ -104,70 +181,74 @@ async function getPermissionsForUser(userId, client = prisma) {
   });
   return [...new Set(assignments.flatMap(assignment =>
     assignment.role.permissions.map(item => item.permission.key)
-  ))];
+  ))].filter(key => PERMISSION_KEYS.has(key));
 }
 
-async function ensureDefaultRoles(client = prisma) {
-  const roles = [
-    { name: 'admin', description: 'Full system and access-control administration' },
-    { name: 'staff', description: 'Standard ICT staff access' },
-    { name: 'user', description: 'Standard requester access' }
-  ];
+async function userHasPermission(userId, permission, client = prisma) {
+  const assignment = await client.userRole.findFirst({
+    where: { userId, role: { permissions: { some: { permission: { key: permission } } } } },
+    select: { id: true }
+  });
+  return Boolean(assignment);
+}
 
-  for (const role of roles) {
-    await client.accessRole.upsert({
-      where: { name: role.name },
-      update: { description: role.description, isSystem: true },
-      create: { ...role, isSystem: true }
-    });
+// Creates/updates the permission catalogue and system roles, retires obsolete permission
+// keys, renames the legacy "staff" role to "officer", and gives every user without a role
+// the role matching their legacy user.role. Idempotent; runs at startup and in the seed.
+async function ensureDefaultRoles(client = prisma) {
+  const legacyStaff = await client.accessRole.findUnique({ where: { name: 'staff' } });
+  const officer = await client.accessRole.findUnique({ where: { name: 'officer' } });
+  if (legacyStaff && !officer) {
+    await client.accessRole.update({ where: { id: legacyStaff.id }, data: { name: 'officer' } });
   }
 
   for (const permission of PERMISSIONS) {
     await client.accessPermission.upsert({
       where: { key: permission.key },
       update: { description: permission.description },
-      create: permission
+      create: { key: permission.key, description: permission.description }
     });
   }
+  // Remove permissions that no longer exist (e.g. old settings.*.view/update keys).
+  await client.accessPermission.deleteMany({ where: { key: { notIn: [...PERMISSION_KEYS] } } });
 
-  const adminRole = await client.accessRole.findUnique({ where: { name: 'admin' } });
-  const allPermissions = await client.accessPermission.findMany({ select: { id: true } });
-  await client.rolePermission.createMany({
-    data: allPermissions.map(permission => ({ roleId: adminRole.id, permissionId: permission.id })),
-    skipDuplicates: true
-  });
-  const selfServicePermissions = await client.accessPermission.findMany({
-    where: { key: { in: [
-      'settings.notifications.view',
-      'settings.notifications.update',
-      'settings.notifications.test'
-    ] } },
-    select: { id: true }
-  });
-  const selfServiceRoles = await client.accessRole.findMany({
-    where: { name: { in: ['staff', 'user'] } },
-    select: { id: true }
-  });
-  await client.rolePermission.createMany({
-    data: selfServiceRoles.flatMap(role => selfServicePermissions.map(permission => ({
-      roleId: role.id,
-      permissionId: permission.id
-    }))),
-    skipDuplicates: true
-  });
+  const permissionIds = new Map(
+    (await client.accessPermission.findMany({ select: { id: true, key: true } })).map(item => [item.key, item.id])
+  );
 
+  for (const role of SYSTEM_ROLES) {
+    const existing = await client.accessRole.findUnique({ where: { name: role.name } });
+    const saved = existing
+      ? await client.accessRole.update({ where: { id: existing.id }, data: { description: role.description, isSystem: true } })
+      : await client.accessRole.create({ data: { name: role.name, description: role.description, isSystem: true } });
+
+    const current = await client.rolePermission.count({ where: { roleId: saved.id } });
+    // Administrator always has everything. Other system roles get their defaults when new or
+    // empty (e.g. after obsolete keys were removed); later edits by administrators are kept.
+    if (role.name === 'admin' || !existing || current === 0) {
+      await client.rolePermission.deleteMany({ where: { roleId: saved.id } });
+      const data = role.permissions.map(key => ({ roleId: saved.id, permissionId: permissionIds.get(key) })).filter(item => item.permissionId);
+      if (data.length) await client.rolePermission.createMany({ data, skipDuplicates: true });
+    }
+  }
+
+  const roles = await client.accessRole.findMany({ select: { id: true, name: true } });
+  const idsByName = new Map(roles.map(role => [role.name, role.id]));
   const users = await client.user.findMany({
     select: { id: true, role: true, roleAssignments: { select: { id: true } } }
   });
-  const roleIds = await client.accessRole.findMany({ select: { id: true, name: true } });
-  const idsByName = new Map(roleIds.map(role => [role.name, role.id]));
   for (const user of users) {
     if (user.roleAssignments.length) continue;
-    const roleName = ['admin', 'staff'].includes(user.role) ? user.role : 'user';
-    await client.userRole.create({
-      data: { userId: user.id, roleId: idsByName.get(roleName) }
-    });
+    const roleName = user.role === 'admin' ? 'admin' : user.role === 'staff' ? 'officer' : 'user';
+    await client.userRole.create({ data: { userId: user.id, roleId: idsByName.get(roleName) } });
   }
+}
+
+// Keeps the legacy user.role column (used by AD sync and display) consistent with roles.
+function legacyRoleFor(roleNames) {
+  if (roleNames.includes('admin')) return 'admin';
+  if (roleNames.some(name => name !== 'user')) return 'staff';
+  return 'user';
 }
 
 async function writeAuditLog({ actor, targetUser, role, action, details }, client = prisma) {
@@ -186,29 +267,15 @@ async function writeAuditLog({ actor, targetUser, role, action, details }, clien
 }
 
 function isValidRolePermissionSet(roleName, permissionKeys) {
-  return roleName === 'admin' || !permissionKeys.includes('access-control.manage');
+  return roleName === 'admin' || !permissionKeys.includes(RESERVED_ADMIN_PERMISSION);
 }
 
+// Working on, assigning, escalating, reopening or exporting tickets all require seeing them.
 function normalizeRolePermissionKeys(permissionKeys) {
-  const result = new Set(permissionKeys);
-  const viewPermissions = {
-    'settings.organization.update': 'settings.organization.view',
-    'settings.email.update': 'settings.email.view',
-    'settings.tickets.update': 'settings.tickets.view',
-    'settings.ldap.update': 'settings.ldap.view',
-    'settings.templates.create': 'settings.templates.view',
-    'settings.templates.update': 'settings.templates.view',
-    'settings.templates.delete': 'settings.templates.view',
-    'settings.templates.reset': 'settings.templates.view',
-    'settings.forms.create': 'settings.forms.view',
-    'settings.forms.update': 'settings.forms.view',
-    'settings.forms.delete': 'settings.forms.view',
-    'settings.notifications.update': 'settings.notifications.view',
-    'settings.notifications.test': 'settings.notifications.view'
-  };
-  for (const key of result) {
-    if (viewPermissions[key]) result.add(viewPermissions[key]);
-  }
+  const result = new Set(permissionKeys.filter(key => PERMISSION_KEYS.has(key)));
+  const needsTicketView = ['tickets.work', 'tickets.assign', 'tickets.escalate', 'tickets.reopen', 'tickets.export'];
+  if (needsTicketView.some(key => result.has(key))) result.add('tickets.view');
+  if (result.has('knowledge.publish')) result.add('knowledge.contribute');
   return [...result];
 }
 
@@ -222,26 +289,25 @@ function canRemoveLastAdmin(targetRole, assigningAdmin, remainingAdminCount) {
 
 function getRequiredSettingsPermissions(fields) {
   if (!fields.length || fields.some(field => !SETTINGS_FIELD_SECTIONS[field])) return null;
-  return [...new Set(fields.map(field =>
-    `settings.${SETTINGS_FIELD_SECTIONS[field]}.update`
-  ))];
+  return [...new Set(fields.map(field => SETTINGS_SECTIONS[SETTINGS_FIELD_SECTIONS[field]]))];
 }
 
 function createPermissionMiddleware(client = prisma) {
-  return (permission) => async (req, res, next) => {
+  return (...permissions) => async (req, res, next) => {
     try {
       if (!req.user?.id) {
         return res.status(401).json({ success: false, message: 'Authentication required' });
       }
+      // Passing several permissions means "any of these".
       const assignment = await client.userRole.findFirst({
         where: {
           userId: req.user.id,
-          role: { permissions: { some: { permission: { key: permission } } } }
+          role: { permissions: { some: { permission: { key: { in: permissions } } } } }
         },
         select: { id: true }
       });
       if (!assignment) {
-        return res.status(403).json({ success: false, message: 'Insufficient permissions' });
+        return res.status(403).json({ success: false, message: 'You do not have permission to do this' });
       }
       next();
     } catch (error) {
@@ -255,16 +321,24 @@ const requirePermission = createPermissionMiddleware();
 
 module.exports = {
   PERMISSIONS,
+  PERMISSION_GROUPS,
+  PERMISSION_KEYS,
+  RESERVED_ADMIN_PERMISSION,
+  ROLE_LABELS,
   SETTINGS_SECTIONS,
   SETTINGS_FIELD_SECTIONS,
-  getPermissionsForUser,
-  ensureDefaultRoles,
-  writeAuditLog,
-  isValidRolePermissionSet,
-  normalizeRolePermissionKeys,
-  canReplaceUserRoles,
+  SYSTEM_ROLES,
+  SYSTEM_ROLE_NAMES,
   canRemoveLastAdmin,
-  getRequiredSettingsPermissions,
+  canReplaceUserRoles,
   createPermissionMiddleware,
-  requirePermission
+  ensureDefaultRoles,
+  getPermissionsForUser,
+  getRequiredSettingsPermissions,
+  isValidRolePermissionSet,
+  legacyRoleFor,
+  normalizeRolePermissionKeys,
+  requirePermission,
+  userHasPermission,
+  writeAuditLog
 };

@@ -20,10 +20,15 @@ import {
   Check,
   RefreshCw,
   Edit2,
-  Trash2
+  Trash2,
+  Upload,
+  FileText
 } from 'lucide-react';
+import { KnowledgeUploadDialog } from './KnowledgeUploadDialog';
+import { KnowledgeAttachmentPreview } from './KnowledgeAttachmentPreview';
 import { knowledgeBaseService } from '../../services/knowledgeBaseService';
 import { authService } from '../../services/authService';
+import { can } from '../../utils/permissions';
 
 // Clean inline markdown parser for **bold** and `code`
 const formatInlineMarkdown = (str) => {
@@ -58,6 +63,7 @@ export const KnowledgeBaseView = () => {
   const [copiedStep, setCopiedStep] = useState(null);
   const [checkedSteps, setCheckedSteps] = useState({});
   const [feedbackSent, setFeedbackSent] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
 
   const [draft, setDraft] = useState({
     title: '',
@@ -71,8 +77,9 @@ export const KnowledgeBaseView = () => {
   });
 
   const currentUser = authService.getCurrentUser();
-  const isAdmin = currentUser?.role === 'admin';
-  const isStaff = currentUser?.role === 'staff' || isAdmin;
+  // isAdmin = may publish/approve/edit; isStaff = may contribute (both are UI hints; the API enforces).
+  const isAdmin = can(currentUser, 'knowledge.publish');
+  const isStaff = can(currentUser, 'knowledge.contribute', 'knowledge.publish');
 
   // Initial load only; later reloads are triggered explicitly by search/filter actions.
   useEffect(() => {
@@ -339,6 +346,16 @@ export const KnowledgeBaseView = () => {
                   Search Gaps ({searchGaps.length})
                 </button>
               </div>
+            )}
+
+            {isStaff && (
+              <button
+                onClick={() => setShowUpload(true)}
+                className="px-3.5 py-1.5 text-xs font-mono font-semibold text-zinc-700 border border-zinc-200 bg-white hover:bg-zinc-50 rounded shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Upload Document</span>
+              </button>
             )}
 
             {isStaff && (
@@ -686,6 +703,19 @@ export const KnowledgeBaseView = () => {
                 </div>
               )}
 
+              {/* Uploaded material, previewed in place */}
+              {Array.isArray(selectedArticle.attachments) && selectedArticle.attachments.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-wider text-zinc-700">
+                    <FileText className="w-4 h-4 text-[#990024]" />
+                    <span>Attached Document{selectedArticle.attachments.length > 1 ? 's' : ''}</span>
+                  </div>
+                  {selectedArticle.attachments.map(attachment => (
+                    <KnowledgeAttachmentPreview key={attachment.storageKey} articleId={selectedArticle.id} attachment={attachment} />
+                  ))}
+                </div>
+              )}
+
               {/* 2. Problem Symptoms */}
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-wider text-amber-800">
@@ -958,6 +988,14 @@ export const KnowledgeBaseView = () => {
         </div>
       )}
 
+      {showUpload && (
+        <KnowledgeUploadDialog
+          categories={categories.filter(category => category !== 'All').length ? categories.filter(category => category !== 'All') : ['General Requests']}
+          isAdmin={isAdmin}
+          onClose={() => setShowUpload(false)}
+          onUploaded={() => loadArticles()}
+        />
+      )}
     </div>
   );
 };

@@ -33,6 +33,7 @@
     "ldapauth-fork": "^6.1.0",
     "ldapjs": "^3.0.7",
     "mailparser": "^3.9.0",
+    "mammoth": "^1.13.0",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
     "nodemailer": "^10.6.1",

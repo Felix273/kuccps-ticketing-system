@@ -420,13 +420,16 @@ function buildSlaCategoryIssues(groups) {
   });
 }
 
+// The SLA clock only runs for Open and InProgress tickets; On Hold pauses it.
+const SLA_RUNNING_STATUSES = ['Open', 'InProgress'];
+
 function isActiveTicketOverdue(ticket, now = new Date()) {
-  if (!['Open', 'InProgress', 'OnHold'].includes(ticket.status)) return false;
+  if (!SLA_RUNNING_STATUSES.includes(ticket.status)) return false;
   return Boolean(getActiveOverdueDeadline(ticket, now));
 }
 
 function getActiveOverdueDeadline(ticket, now = new Date()) {
-  if (!['Open', 'InProgress', 'OnHold'].includes(ticket.status)) return null;
+  if (!SLA_RUNNING_STATUSES.includes(ticket.status)) return null;
   const deadlines = [];
   if (ticket.responseDueAt && !ticket.firstRespondedAt) deadlines.push(new Date(ticket.responseDueAt));
   if (ticket.slaDueAt && !ticket.resolvedAt) deadlines.push(new Date(ticket.slaDueAt));

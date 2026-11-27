@@ -27,6 +27,7 @@ import { useTicketPage } from '../../hooks/useTicketPage';
 import { exportToCSV, exportToExcel } from '../../utils/exportUtils';
 import { authService } from '../../services/authService';
 import { PRIORITY_LEVELS, TICKET_STATUS, normalizePriority } from '../../utils/constants';
+import { can } from '../../utils/permissions';
 
 // Debounce text input so typing in the search box does not send a request per keystroke.
 function useDebouncedValue(value, delayMs = 300) {
@@ -429,14 +430,16 @@ export const TicketsView = ({
               <span>Filters</span>
             </button>
 
-            <button
-              onClick={() => handleExport('csv')}
-              disabled={isExporting}
-              className="px-2.5 py-1 text-xs font-mono border border-zinc-200 rounded hover:bg-zinc-50 text-zinc-600 flex items-center gap-1"
-            >
-              <Download className="w-3 h-3 text-zinc-400" />
-              <span>{isExporting ? 'Exporting...' : 'Export'}</span>
-            </button>
+            {can(currentUser, 'tickets.export') && (
+              <button
+                onClick={() => handleExport('csv')}
+                disabled={isExporting}
+                className="px-2.5 py-1 text-xs font-mono border border-zinc-200 rounded hover:bg-zinc-50 text-zinc-600 flex items-center gap-1"
+              >
+                <Download className="w-3 h-3 text-zinc-400" />
+                <span>{isExporting ? 'Exporting...' : 'Export'}</span>
+              </button>
+            )}
 
             <button
               onClick={refreshList}
@@ -511,12 +514,16 @@ export const TicketsView = ({
                         {/* Refined Assignee Cell */}
                         <td className="py-3 px-4 whitespace-nowrap">
                           {isUnclaimed ? (
-                            <button
-                              onClick={(e) => handleClaimTicket(ticket, e)}
-                              className="px-2 py-0.5 text-[10px] font-mono font-semibold text-zinc-600 hover:text-[#990024] hover:border-[#990024] bg-white border border-zinc-200 rounded transition-colors"
-                            >
-                              + Claim
-                            </button>
+                            can(currentUser, 'tickets.work') ? (
+                              <button
+                                onClick={(e) => handleClaimTicket(ticket, e)}
+                                className="px-2 py-0.5 text-[10px] font-mono font-semibold text-zinc-600 hover:text-[#990024] hover:border-[#990024] bg-white border border-zinc-200 rounded transition-colors"
+                              >
+                                + Claim
+                              </button>
+                            ) : (
+                              <span className="font-mono text-[11px] text-zinc-400">Unclaimed</span>
+                            )
                           ) : (
                             <div className="flex items-center gap-1.5">
                               <span className="w-5 h-5 rounded-full bg-zinc-100 text-zinc-700 text-[9px] font-mono font-bold flex items-center justify-center border border-zinc-200 shrink-0">
@@ -546,7 +553,7 @@ export const TicketsView = ({
                   key={t.id} 
                   ticket={t} 
                   currentUser={currentUser} 
-                  onClaim={() => handleClaimTicket(t)} 
+                  onClaim={can(currentUser, 'tickets.work') ? () => handleClaimTicket(t) : undefined}
                   onViewDetails={() => setViewingTicket(t)} 
                 />
               ))}

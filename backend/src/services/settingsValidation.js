@@ -98,9 +98,6 @@ const secret = (value, field) => {
 
 const FIELD_RULES = {
   organizationName: text(120, { required: true }),
-  organizationCode: text(20, { required: true }),
-  logoUrl: imageUrl,
-  faviconUrl: imageUrl,
   primaryColor: color,
   secondaryColor: color,
   supportEmail: email({ required: true }),
@@ -145,7 +142,6 @@ const FIELD_RULES = {
     }
     return value.trim().toUpperCase();
   },
-  ticketNumberFormat: oneOf(['YYYYMMDD-XXXX']),
   defaultPriority: (value, field) => {
     const normalized = normalizePriority(value);
     if (!normalized) throw new Error(`${field} is not a valid priority`);
@@ -159,8 +155,6 @@ const FIELD_RULES = {
     }
     return normalized;
   },
-  googleAddonApiUrl: httpUrl,
-  googleAddonEnabled: bool,
   maxFileSize: int(1024, 100 * 1024 * 1024),
   allowedFileTypes: (value, field) => {
     const list = Array.isArray(value) ? value : String(value ?? '').split(/[,;\s]+/);
@@ -170,17 +164,24 @@ const FIELD_RULES = {
     }
     return extensions.join(',');
   },
-  maintenanceMode: bool,
-  maintenanceMessage: text(1000),
-  darkModeEnabled: bool,
-  contrastMode: oneOf(['normal', 'high'])
+  reopenWindowDays: int(1, 90),
+  slaWarningPercent: int(10, 99),
+  escalationEmails: (value, field) => {
+    const cleaned = text(1000)(value, field);
+    if (cleaned === null) return null;
+    const emails = cleaned.split(/[,;\s]+/).map(item => item.trim().toLowerCase()).filter(Boolean);
+    if (emails.some(item => !EMAIL.test(item))) throw new Error(field + ' must be a comma-separated list of email addresses');
+    return emails.join(', ');
+  },
+  emailTestMode: bool,
+  emailTestAddress: email()
 };
 
 // Fields whose value may legitimately be null in the database.
 const NULLABLE = new Set([
   'logoUrl', 'faviconUrl', 'smtpUser', 'imapUser', 'ldapUrl', 'ldapBaseDn', 'ldapUserDnPrefix',
   'ldapBindDn', 'ldapDomain', 'ldapUserSearchBase', 'ldapUserFilter', 'ldapDirectorateSearchBase',
-  'ldapDirectorateFilter', 'ldapIctGroupDn', 'ldapIctUserFilter', 'googleAddonApiUrl', 'maintenanceMessage'
+  'ldapDirectorateFilter', 'ldapIctGroupDn', 'ldapIctUserFilter', 'googleAddonApiUrl', 'maintenanceMessage', 'escalationEmails', 'emailTestAddress'
 ]);
 
 function validateSettingsUpdate(body) {

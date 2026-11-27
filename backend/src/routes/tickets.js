@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const ticketController = require('../controllers/ticketController');
-const { authenticateToken, requireStaffOrAdmin } = require('../middleware/auth');
+const { authenticateToken, requirePermission } = require('../middleware/auth');
 const { uploadDir } = require('../services/uploadStorage');
 const prisma = require('../lib/prisma');
 
@@ -46,7 +46,7 @@ const upload = multer({
 
 // Protected routes - require authentication
 router.use(authenticateToken);
-router.use(requireStaffOrAdmin);
+const canView = requirePermission('tickets.view');
 
 router.post("/", (req, res) => {
   res.status(403).json({
@@ -54,17 +54,18 @@ router.post("/", (req, res) => {
     message: 'Tickets must be generated from requester email intake. Manual staff ticket creation is disabled.'
   });
 });
-router.get('/', ticketController.getAllTickets);
-router.get('/statistics', ticketController.getStatistics);
-router.get('/overview', ticketController.getOverview);
-router.get('/workload', ticketController.getWorkload);
-router.get('/export', ticketController.exportTickets);
-router.get('/:id', ticketController.getTicketById);
-router.get('/:id/attachments/:attachmentId', ticketController.downloadAttachment);
-router.put('/:id', ticketController.updateTicket);
-router.post('/:id/escalate', ticketController.escalateTicket);
-router.post('/:id/comments', ticketController.addComment);
-router.post('/:id/attachments', upload.single('file'), ticketController.addAttachment);
+router.get('/', canView, ticketController.getAllTickets);
+router.get('/statistics', canView, ticketController.getStatistics);
+router.get('/overview', requirePermission('reports.view', 'tickets.view'), ticketController.getOverview);
+router.get('/workload', requirePermission('users.view', 'reports.view'), ticketController.getWorkload);
+router.get('/export', requirePermission('tickets.export'), ticketController.exportTickets);
+router.get('/:id', canView, ticketController.getTicketById);
+router.get('/:id/attachments/:attachmentId', canView, ticketController.downloadAttachment);
+// Fine-grained checks (assigning others, reopening) happen in the controller.
+router.put('/:id', requirePermission('tickets.work', 'tickets.assign', 'tickets.reopen'), ticketController.updateTicket);
+router.post('/:id/escalate', requirePermission('tickets.escalate'), ticketController.escalateTicket);
+router.post('/:id/comments', requirePermission('tickets.work'), ticketController.addComment);
+router.post('/:id/attachments', requirePermission('tickets.work'), upload.single('file'), ticketController.addAttachment);
 
 // Note: We don't have a delete function yet, so commenting this out
 // If you need to add delete functionality later, add it to the controller first

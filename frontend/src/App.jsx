@@ -14,6 +14,7 @@ import { authService } from './services/authService';
 import { settingsService } from './services/settingsService';
 import { accessControlService } from './services/accessControlService';
 import { useIdleLogout } from './hooks/useIdleLogout';
+import { can, SCREENS } from './utils/permissions';
 
 function App() {
   // The session is an httpOnly cookie; the cached profile only drives the initial UI and is
@@ -23,7 +24,8 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(Boolean(initialUser));
   const [currentUser, setCurrentUser] = useState(initialUser);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [selectedTab, setActiveTab] = useState(null);
+  const [accessLoaded, setAccessLoaded] = useState(false);
   const [dashboardTicketFilter, setDashboardTicketFilter] = useState(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
@@ -50,17 +52,21 @@ function App() {
     accessControlService.getMyAccess()
       .then(access => {
         if (active) {
-          setCurrentUser(user => user ? {
-            ...user,
-            permissions: access.permissions || [],
-            isAdmin: Boolean(access.isAdmin)
-          } : user);
+          setCurrentUser(user => {
+            if (!user) return user;
+            const next = { ...user, permissions: access.permissions || [], roles: access.roles || [], isAdmin: Boolean(access.isAdmin) };
+            // Cache for screens that read the profile directly (UI hints only; the API enforces).
+            localStorage.setItem('user', JSON.stringify(next));
+            return next;
+          });
+          setAccessLoaded(true);
         }
       })
       .catch(error => {
         console.error('Unable to load current access permissions:', error);
         if (active) {
           setCurrentUser(user => user ? { ...user, permissions: [], isAdmin: false } : user);
+          setAccessLoaded(true);
         }
       });
     return () => { active = false; };
@@ -69,6 +75,7 @@ function App() {
   // The API client raises this when the server rejects the session (expired or revoked).
   useEffect(() => {
     const onExpired = () => {
+      setAccessLoaded(false);
       setCurrentUser(null);
       setIsAuthenticated(false);
       setShowHomePage(false);
@@ -105,11 +112,15 @@ function App() {
   };
 
   const handleLogout = () => {
+    setAccessLoaded(false);
     authService.logout();
     setCurrentUser(null);
     setIsAuthenticated(false);
     setShowHomePage(true);
   };
+
+  const allowedScreens = SCREENS.filter(screen => can(currentUser, ...screen.permissions)).map(screen => screen.id);
+  const activeTab = allowedScreens.includes(selectedTab) ? selectedTab : allowedScreens[0];
 
   useIdleLogout(isAuthenticated, () => {
     handleLogout();
@@ -134,6 +145,21 @@ function App() {
         />
         <Toaster position="top-right" toastOptions={{ className: "font-mono text-xs border border-zinc-200 bg-white text-zinc-900 shadow-lg rounded-lg p-3", duration: 3500 }} />
       </>
+    );
+  }
+
+  if (!accessLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center font-mono text-xs text-zinc-500">Loading your access...</div>
+    );
+  }
+
+  if (!allowedScreens.length) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 p-6 text-center">
+        <p className="text-sm text-zinc-700">Your account has no role in the ICT service desk yet. Ask an administrator to assign you a role.</p>
+        <button type="button" onClick={handleLogout} className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm">Sign out</button>
+      </div>
     );
   }
 

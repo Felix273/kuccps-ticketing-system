@@ -221,6 +221,9 @@ exports.updateSettings = async (req, res) => {
     if (maintenanceMessage !== undefined) updateData.maintenanceMessage = maintenanceMessage;
     if (darkModeEnabled !== undefined) updateData.darkModeEnabled = darkModeEnabled;
     if (contrastMode !== undefined) updateData.contrastMode = contrastMode;
+    for (const field of ['reopenWindowDays', 'slaWarningPercent', 'escalationEmails', 'emailTestMode', 'emailTestAddress']) {
+      if (validated[field] !== undefined) updateData[field] = validated[field];
+    }
 
     const updated = await prisma.$transaction(async transaction => {
       await transaction.systemSettings.update({

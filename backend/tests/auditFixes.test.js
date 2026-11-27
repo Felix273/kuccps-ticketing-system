@@ -19,8 +19,7 @@ test('settings validation coerces types and rejects unsafe values', () => {
     defaultStatus: 'In Progress',
     defaultPriority: 'very high',
     allowedFileTypes: 'PDF, .docx ,png',
-    smtpPassword: '********',
-    logoUrl: '/kuccps-logo.png'
+    smtpPassword: '********'
   });
   assert.deepEqual(ok.errors, []);
   assert.equal(ok.data.smtpPort, 587);

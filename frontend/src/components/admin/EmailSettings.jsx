@@ -197,6 +197,35 @@ const EmailSettings = () => {
         </div>
       </div>
 
+      <div>
+        <h3 className="text-lg font-medium mb-2">Test Mode</h3>
+        <p className="mb-3 text-xs text-gray-500">
+          While enabled, every outgoing email (requester updates, escalations, notifications) is sent to the test
+          mailbox instead of the real recipient. The subject shows who it would have gone to.
+        </p>
+        <label className="flex items-center gap-2 text-sm font-medium mb-3">
+          <input
+            type="checkbox"
+            checked={Boolean(settings.emailTestMode)}
+            onChange={(e) => setSettings(prev => ({...prev, emailTestMode: e.target.checked}))}
+            disabled={saving}
+          />
+          Send all email to the test mailbox
+        </label>
+        <label className="block text-sm font-medium mb-1">Test mailbox address</label>
+        <input
+          type="email"
+          placeholder="e.g. ict.testing@kuccps.ac.ke"
+          value={settings.emailTestAddress || ''}
+          onChange={(e) => setSettings(prev => ({...prev, emailTestAddress: e.target.value}))}
+          className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-primary-500"
+          disabled={saving}
+        />
+        {settings.emailTestMode && !settings.emailTestAddress && (
+          <p className="mt-1 text-xs text-rose-600">Enter a test mailbox address, otherwise emails go to real recipients.</p>
+        )}
+      </div>
+
       <button
         type="submit"
         disabled={saving}

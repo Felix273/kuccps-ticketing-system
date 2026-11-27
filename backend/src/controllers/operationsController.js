@@ -14,6 +14,8 @@ const {
 } = require('../services/slaService');
 const prisma = require('../lib/prisma');
 const { normalizePriority } = require('../services/ticketEnums');
+const { EVENTS, recordTicketEvent } = require('../services/ticketActivity');
+const { createTicketNotification, notifyPermissionHolders } = require('../services/notificationService');
 
 const OPEN_STATUSES = new Set(['Open', 'InProgress', 'OnHold']);
 const RESOLVED_STATUSES = new Set(['Resolved', 'Closed']);
@@ -463,14 +465,64 @@ async function recordRequesterCsat({ ticket, rating, comment, userId }) {
     }
   }
 
+  const actor = { id: userId || 'requester', name: `Requester (${ticket.requesterEmail || 'feedback link'})` };
+  if (!alreadyRecorded) {
+    await recordTicketEvent(prisma, {
+      ticketId: ticket.id,
+      field: EVENTS.csat,
+      newValue: `${response.rating}/5`,
+      actor,
+      note: response.comment || null
+    });
+
+    // A poor rating (2 stars or below) alerts the officer and the managers for follow-up.
+    if (response.rating <= 2) {
+      const full = await prisma.ticket.findUnique({
+        where: { id: ticket.id },
+        select: { id: true, ticketNumber: true, subject: true, assignedToId: true }
+      });
+      const alert = {
+        ticket: full,
+        type: 'csat_low',
+        title: 'Low customer rating — follow-up needed',
+        message: `${full.ticketNumber}: "${full.subject}" was rated ${response.rating}/5 by the requester.${response.comment ? `\nComment: ${response.comment}` : ''}`,
+        dedupeKey: `csat-low-${full.id}`
+      };
+      // The officer who resolved it (from the activity log) and the current assignee may differ,
+      // e.g. after an escalation; both should see the feedback.
+      const resolvedEvent = await prisma.ticketHistory.findFirst({
+        where: { ticketId: full.id, field: 'status', newValue: 'Resolved' },
+        orderBy: { createdAt: 'desc' },
+        select: { changedBy: true }
+      });
+      const resolver = resolvedEvent?.changedBy
+        ? await prisma.user.findUnique({ where: { id: resolvedEvent.changedBy }, select: { id: true } })
+        : null;
+      const officers = [...new Set([full.assignedToId, resolver?.id].filter(Boolean))];
+      await notifyPermissionHolders({ permission: 'tickets.assign', excludeUserIds: officers, ...alert })
+        .catch(error => console.error('Low rating alert failed:', error.message));
+      for (const officerId of officers) {
+        await createTicketNotification({ userId: officerId, ...alert }).catch(() => null);
+      }
+    }
+  }
+
   if (alreadyRecorded && safeComment && !response.comment) {
     response = await prisma.csatResponse.update({
       where: { id: response.id },
       data: { comment: safeComment },
       select: CSAT_RESPONSE_SELECT
     });
+    await recordTicketEvent(prisma, {
+      ticketId: ticket.id,
+      field: EVENTS.csat,
+      newValue: 'Comment added',
+      actor,
+      note: safeComment
+    });
   }
 
+  // Tickets close at resolution; this only finalises tickets left in the legacy Resolved state.
   let ticketStatus = ticket.status;
   if (ticket.status === 'Resolved') {
     const closed = await prisma.ticket.updateMany({
@@ -479,14 +531,12 @@ async function recordRequesterCsat({ ticket, rating, comment, userId }) {
     });
     if (closed.count) {
       ticketStatus = 'Closed';
-      await prisma.ticketHistory.create({
-        data: {
-          ticketId: ticket.id,
-          field: 'status',
-          oldValue: 'Resolved',
-          newValue: 'Closed',
-          changedBy: userId || 'Requester (CSAT)'
-        }
+      await recordTicketEvent(prisma, {
+        ticketId: ticket.id,
+        field: EVENTS.status,
+        oldValue: 'Resolved',
+        newValue: 'Closed',
+        actor
       });
     }
   }
@@ -747,5 +797,78 @@ exports.getDashboardAnalytics = async (req, res) => {
   } catch (error) {
     console.error('Dashboard analytics error:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch dashboard analytics' });
+  }
+};
+
+// Customer-feedback reporting for officers and management: weekly trend, breakdown by
+// officer and category, response rate, and low ratings (<= 2) that need follow-up.
+exports.getCsatReport = async (req, res) => {
+  try {
+    const timeZone = process.env.TICKET_TIMEZONE || 'Africa/Nairobi';
+    const twelveWeeksAgo = new Date(Date.now() - 84 * 24 * 60 * 60 * 1000);
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const [trend, byOfficer, byCategory, closedRecently, ratedRecently, lowRatings] = await Promise.all([
+      prisma.$queryRaw`
+        SELECT to_char(date_trunc('week', c."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE ${timeZone}), 'YYYY-MM-DD') AS week,
+               round(avg(c.rating)::numeric, 2)::float AS average,
+               count(*)::int AS responses,
+               count(*) FILTER (WHERE c.rating >= ${CSAT_SATISFIED_MIN_RATING})::int AS satisfied
+          FROM "CsatResponse" c
+         WHERE c."createdAt" >= ${twelveWeeksAgo}
+         GROUP BY 1 ORDER BY 1`,
+      prisma.$queryRaw`
+        SELECT COALESCE(u.name, 'Unassigned') AS officer,
+               round(avg(c.rating)::numeric, 2)::float AS average,
+               count(*)::int AS responses,
+               count(*) FILTER (WHERE c.rating <= 2)::int AS "lowRatings"
+          FROM "CsatResponse" c
+          JOIN "Ticket" t ON t.id = c."ticketId"
+          LEFT JOIN "User" u ON u.id = t."assignedToId"
+         GROUP BY 1 ORDER BY responses DESC LIMIT 20`,
+      prisma.$queryRaw`
+        SELECT t.category, round(avg(c.rating)::numeric, 2)::float AS average, count(*)::int AS responses
+          FROM "CsatResponse" c JOIN "Ticket" t ON t.id = c."ticketId"
+         GROUP BY 1 ORDER BY responses DESC`,
+      prisma.ticket.count({ where: { status: 'Closed', closedAt: { gte: ninetyDaysAgo } } }),
+      prisma.ticket.count({ where: { status: 'Closed', closedAt: { gte: ninetyDaysAgo }, csatResponses: { some: {} } } }),
+      prisma.csatResponse.findMany({
+        where: { rating: { lte: 2 } },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: {
+          rating: true,
+          comment: true,
+          createdAt: true,
+          ticket: { select: { id: true, ticketNumber: true, subject: true, category: true, assignedTo: { select: { name: true } } } }
+        }
+      })
+    ]);
+    res.json({
+      success: true,
+      report: {
+        trend,
+        byOfficer,
+        byCategory,
+        responseRate: {
+          closedTickets: closedRecently,
+          ratedTickets: ratedRecently,
+          percent: closedRecently ? Math.round((ratedRecently / closedRecently) * 100) : null,
+          windowDays: 90
+        },
+        lowRatings: lowRatings.map(item => ({
+          rating: item.rating,
+          comment: item.comment,
+          createdAt: item.createdAt,
+          ticketId: item.ticket.id,
+          ticketNumber: item.ticket.ticketNumber,
+          subject: item.ticket.subject,
+          category: item.ticket.category,
+          officer: item.ticket.assignedTo?.name || 'Unassigned'
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('CSAT report error:', error);
+    res.status(500).json({ success: false, message: 'Failed to build feedback report' });
   }
 };

@@ -1,12 +1,14 @@
+// Ticket categories follow the ICT Service Charter; each maps to an SLA timeline
+// (network, email, access and other incidents use 'Incident/Problem Resolution',
+// whose timeline depends on the priority).
 export const ISSUE_CATEGORIES = [
-  'Hardware Issues',
-  'Network & Connectivity Issues',
-  'Software Issues',
-  'Email & Communication Issues',
-  'Access & Security Issues',
-  'System Performance Issues',
-  'Peripheral Devices',
-  'General Requests'
+  'Equipment Issuance',
+  'Hardware Support',
+  'Software Support',
+  'Provision of Information',
+  'Incident/Problem Resolution',
+  'Software Development',
+  'Information Inquiry'
 ];
 
 export const PRIORITY_LEVELS = ['VeryHigh', 'High', 'Medium', 'Low', 'VeryLow'];

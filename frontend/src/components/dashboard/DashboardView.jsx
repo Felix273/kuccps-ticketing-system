@@ -32,6 +32,7 @@ import { TicketTrendsChart } from './charts/TicketTrendsChart';
 import { TopCategoriesChart } from './TopCategoriesChart';
 import { operationsService } from '../../services/operationsService';
 import { ticketService } from '../../services/ticketService';
+import { CustomerFeedbackPanel } from './CustomerFeedbackPanel';
 
 const DONUT_COLORS = {
   Open: '#2563eb',
@@ -505,7 +506,7 @@ export const DashboardView = ({ refreshKey = 0, onViewTickets }) => {
                     </td>
                     <td className="py-2.5 px-3 whitespace-nowrap">
                       <span className={`text-[9px] uppercase font-bold px-1 py-0.2 border ${
-                        ticket.priority === 'Critical' 
+                        ['Critical', 'VeryHigh'].includes(ticket.priority) 
                           ? 'bg-rose-50 text-rose-700 border-rose-200' 
                           : 'bg-amber-50 text-amber-700 border-amber-200'
                       }`}>
@@ -579,6 +580,10 @@ export const DashboardView = ({ refreshKey = 0, onViewTickets }) => {
         </div>
       )}
 
+      <CustomerFeedbackPanel
+        refreshKey={refreshKey}
+        onOpenTicket={item => selectTickets(`Ticket ${item.ticketNumber}`, { q: item.ticketNumber })}
+      />
     </div>
   );
 };

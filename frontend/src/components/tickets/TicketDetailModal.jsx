@@ -28,6 +28,17 @@ import toast from 'react-hot-toast';
 import { ticketService } from '../../services/ticketService';
 import { knowledgeBaseService } from '../../services/knowledgeBaseService';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { TicketActionDialog } from './TicketActionDialog';
+import { buildActivityTimeline } from '../../utils/ticketActivity';
+import { can } from '../../utils/permissions';
+
+const ACTIVITY_TONES = {
+  blue: 'bg-blue-500',
+  amber: 'bg-amber-500',
+  emerald: 'bg-emerald-500',
+  rose: 'bg-rose-500',
+  zinc: 'bg-zinc-400'
+};
 
 const STATUS_DISPLAY_NAMES = {
   Open: 'Open',
@@ -37,7 +48,21 @@ const STATUS_DISPLAY_NAMES = {
   Closed: 'Closed'
 };
 
-export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, users = [] }) => {
+export const TicketDetailModal = ({ ticket: ticketSummary, onClose, onUpdate, currentUser, users = [] }) => {
+  // The list only carries summary fields; load the full ticket (conversation,
+  // attachments and activity log) and refresh it after every change.
+  const [detail, setDetail] = useState(null);
+  const [detailVersion, setDetailVersion] = useState(0);
+  useEffect(() => {
+    let active = true;
+    ticketService.getById(ticketSummary.id)
+      .then(response => { if (active && response.success) setDetail(response.ticket); })
+      .catch(error => console.warn('Could not load ticket details:', error.message));
+    return () => { active = false; };
+  }, [ticketSummary.id, detailVersion]);
+  const reloadDetail = () => setDetailVersion(version => version + 1);
+  const ticket = detail || ticketSummary;
+  const [actionDialog, setActionDialog] = useState(null); // 'resolve' | 'hold' | null
   const [activeTab, setActiveTab] = useState('details');
   const [replyText, setReplyText] = useState('');
   const [isInternal, setIsInternal] = useState(false);
@@ -70,15 +95,20 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
     loadSuggestions();
   }, [ticket.id]);
 
-  const executeStatusUpdate = async (newStatus) => {
+  const executeStatusUpdate = async (newStatus, details = null) => {
     setIsUpdating(true);
     try {
-      const result = newStatus === 'InProgress' && currentUser?.id
-        ? await ticketService.startWorking(ticket.id, currentUser.id)
-        : await ticketService.updateStatus(ticket.id, newStatus);
+      const result = details
+        ? await ticketService.update(ticket.id, details)
+        : newStatus === 'InProgress' && currentUser?.id && !ticket.assignedToId
+          ? await ticketService.startWorking(ticket.id, currentUser.id)
+          : await ticketService.updateStatus(ticket.id, newStatus);
 
       if (result.success) {
-        toast.success(`Ticket status updated to ${STATUS_DISPLAY_NAMES[newStatus] || newStatus}`);
+        const label = newStatus === 'Resolved' ? 'Resolved and closed' : `Ticket status updated to ${STATUS_DISPLAY_NAMES[newStatus] || newStatus}`;
+        toast.success(label);
+        if (result.knowledgeDraft) toast.success(`Knowledge-base draft created: ${result.knowledgeDraft.title}`);
+        setActionDialog(null);
         if (onUpdate) await onUpdate();
         onClose();
       } else {
@@ -132,6 +162,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
         setReplyText('');
         setIsInternal(false);
         toast.success(isInternal ? 'Internal note added' : 'Email update sent to requester');
+        reloadDetail();
         if (onUpdate) await onUpdate();
       }
     } catch (error) {
@@ -149,6 +180,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
       const result = await ticketService.addAttachment(ticket.id, file);
       if (result.success) {
         toast.success('Attachment uploaded successfully');
+        reloadDetail();
         if (onUpdate) await onUpdate();
       } else {
         toast.error(result.message || 'Failed to upload attachment');
@@ -185,7 +217,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
         isPrimary: false
       });
       actions.push({
-        label: 'Resolve Ticket',
+        label: 'Resolve & Close',
         status: 'Resolved',
         dialogTitle: 'Mark Ticket as Resolved?',
         dialogMessage: `Are you sure you want to resolve #${ticket.ticketNumber}? A resolution confirmation with CSAT feedback ratings will be emailed to ${ticket.requesterEmail}.`,
@@ -213,7 +245,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
         isPrimary: false
       });
       actions.push({
-        label: 'Resolve Ticket',
+        label: 'Resolve & Close',
         status: 'Resolved',
         dialogTitle: 'Mark Ticket as Resolved?',
         dialogMessage: `Are you sure you want to resolve #${ticket.ticketNumber}? An automated confirmation with 1-click CSAT satisfaction ratings will be sent to ${ticket.requesterEmail}.`,
@@ -232,7 +264,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
         isPrimary: true
       });
       actions.push({
-        label: 'Resolve Ticket',
+        label: 'Resolve & Close',
         status: 'Resolved',
         dialogTitle: 'Mark Ticket as Resolved?',
         dialogMessage: `Mark #${ticket.ticketNumber} as resolved and send CSAT notification?`,
@@ -249,15 +281,6 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
         icon: <RotateCcw className="w-3.5 h-3.5" />,
         dialogType: 'warning',
         isPrimary: false
-      });
-      actions.push({
-        label: 'Close Ticket',
-        status: 'Closed',
-        dialogTitle: 'Permanently Close Ticket?',
-        dialogMessage: `Manually close ticket #${ticket.ticketNumber}? Note: tickets also close automatically when users submit their CSAT email rating.`,
-        icon: <XCircle className="w-3.5 h-3.5" />,
-        dialogType: 'primary',
-        isPrimary: true
       });
     } else if (currentStatus === 'Closed') {
       actions.push({
@@ -296,6 +319,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
   ];
 
   const statusActions = getStatusActions();
+  const activityTimeline = buildActivityTimeline(ticket.history || []);
   const escalationTargets = users.filter(user =>
     user.role !== 'user' &&
     user.id !== currentUser?.id &&
@@ -531,7 +555,8 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
                     {!showEscalation ? (
                       <button
                         onClick={() => setShowEscalation(true)}
-                        disabled={['Resolved', 'Closed'].includes(ticket.status)}
+                        disabled={['Resolved', 'Closed'].includes(ticket.status) || !can(currentUser, 'tickets.escalate')}
+                        title={can(currentUser, 'tickets.escalate') ? undefined : 'Your role cannot escalate tickets'}
                         className="px-3 py-1.5 text-xs font-mono font-semibold border border-zinc-200 rounded hover:bg-zinc-50 text-zinc-700 transition-colors cursor-pointer disabled:opacity-50"
                       >
                         Escalate Ticket To Officer
@@ -640,7 +665,7 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
                   ))}
                 </div>
 
-                {ticket.status !== 'Closed' && (
+                {ticket.status !== 'Closed' && can(currentUser, 'tickets.work') && (
                   <div className="p-4 rounded-lg border border-zinc-200 bg-zinc-50/60 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="font-mono text-xs font-bold text-zinc-700 uppercase">
@@ -695,17 +720,42 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
             )}
 
             {activeTab === 'activity' && (
-              <div className="space-y-3 font-mono text-xs">
-                {[
-                  { action: 'Ticket Created', timestamp: ticket.createdAt },
-                  ...(ticket.assignedTo ? [{ action: `Claimed by ${ticket.assignedTo.name}`, timestamp: ticket.updatedAt }] : []),
-                  ...(ticket.resolvedAt ? [{ action: 'Ticket Resolved', timestamp: ticket.resolvedAt }] : [])
-                ].map((activity, idx) => (
-                  <div key={idx} className="p-3 rounded border border-zinc-100 bg-zinc-50/50 flex justify-between items-center">
-                    <span className="font-semibold text-zinc-800">{activity.action}</span>
-                    <span className="text-zinc-400 text-[11px] tabular-nums">{new Date(activity.timestamp).toLocaleString()}</span>
+              <div className="space-y-2 font-mono text-xs">
+                {!detail && <p className="text-zinc-400">Loading activity log...</p>}
+                {detail && activityTimeline.length === 0 && (
+                  <p className="text-zinc-400">No activity has been recorded for this ticket yet.</p>
+                )}
+                <ol className="relative border-l border-zinc-200 ml-2">
+                  {activityTimeline.map(activity => (
+                    <li key={activity.id} className="mb-3 ml-4">
+                      <span className={`absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full ${ACTIVITY_TONES[activity.tone] || ACTIVITY_TONES.zinc}`} aria-hidden="true" />
+                      <div className="p-3 rounded border border-zinc-100 bg-zinc-50/50">
+                        <div className="flex flex-wrap justify-between gap-2">
+                          <span className="font-semibold text-zinc-800">{activity.title}</span>
+                          <time className="text-zinc-400 text-[11px] tabular-nums" dateTime={activity.timestamp}>
+                            {new Date(activity.timestamp).toLocaleString()}
+                          </time>
+                        </div>
+                        <p className="mt-0.5 text-[11px] text-zinc-500">by {activity.actor}</p>
+                        {activity.note && <p className="mt-1.5 whitespace-pre-line font-sans text-xs text-zinc-700">{activity.note}</p>}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+                {ticket.resolutionNotes && (
+                  <div className="p-3 rounded border border-emerald-100 bg-emerald-50/50 font-sans">
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-emerald-800">Resolution record</p>
+                    <p className="mt-1 whitespace-pre-line text-zinc-800">{ticket.resolutionNotes}</p>
+                    <p className="mt-2 text-[11px] text-zinc-600">
+                      Effectiveness: {ticket.resolutionEffectiveness ? `${ticket.resolutionEffectiveness}/5` : 'not rated'}
+                      {' · '}Reusable: {ticket.resolutionReusable == null ? 'not stated' : ticket.resolutionReusable ? 'yes' : 'no'}
+                      {ticket.totalHoldMinutes ? ` · Time on hold: ${Math.round(ticket.totalHoldMinutes / 60)} h` : ''}
+                    </p>
+                    {ticket.resolutionRecommendations && (
+                      <p className="mt-1 text-[11px] text-zinc-600">Recommendations: {ticket.resolutionRecommendations}</p>
+                    )}
                   </div>
-                ))}
+                )}
               </div>
             )}
 
@@ -721,10 +771,17 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
             </button>
 
             <div className="flex items-center gap-2">
-              {currentUser?.role !== 'user' && statusActions.map((action) => (
+              {statusActions
+                .filter(action => (action.status === 'Open' ? can(currentUser, 'tickets.reopen') : can(currentUser, 'tickets.work')))
+                .map((action) => (
                 <button
                   key={action.status}
-                  onClick={() => setPendingStatusUpdate(action)}
+                  onClick={() => {
+                    // Resolving and holding need details (resolution notes / hold reason).
+                    if (action.status === 'Resolved') setActionDialog('resolve');
+                    else if (action.status === 'OnHold') setActionDialog('hold');
+                    else setPendingStatusUpdate(action);
+                  }}
                   disabled={isUpdating}
                   className={`px-3.5 py-1.5 text-xs font-mono font-semibold rounded transition-all flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 ${
                     action.isPrimary
@@ -753,6 +810,16 @@ export const TicketDetailModal = ({ ticket, onClose, onUpdate, currentUser, user
         onConfirm={() => executeStatusUpdate(pendingStatusUpdate?.status)}
         onCancel={() => setPendingStatusUpdate(null)}
       />
+      {actionDialog && (
+        <TicketActionDialog
+          mode={actionDialog}
+          ticket={ticket}
+          articles={suggestions?.articles || []}
+          isLoading={isUpdating}
+          onSubmit={details => executeStatusUpdate(details.status, details)}
+          onCancel={() => setActionDialog(null)}
+        />
+      )}
     </>
   );
 };

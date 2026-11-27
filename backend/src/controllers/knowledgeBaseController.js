@@ -3,6 +3,20 @@ const path = require('path');
 const { uploadDir, resolveUploadPath, removeUploadFile } = require('../services/uploadStorage');
 const { parseDelimitedValues } = require('../services/normalizedValues');
 const prisma = require('../lib/prisma');
+const { userHasPermission } = require('../services/accessControlService');
+const { notifyPermissionHolders } = require('../services/notificationService');
+
+// Tell knowledge publishers that something is waiting in the review queue (in-app).
+async function alertReviewers(article, author) {
+  await notifyPermissionHolders({
+    permission: 'knowledge.publish',
+    excludeUserIds: [author?.id],
+    type: 'knowledge_review',
+    title: 'Knowledge article awaiting review',
+    message: `"${article.title}" was submitted by ${author?.name || 'an ICT officer'} and is in the Review Queue.`,
+    dedupeKey: `kb-review-${article.id}`
+  }).catch(error => console.error('Review alert failed:', error.message));
+}
 
 const articleRelations = {
   tags: { include: { tag: true } },
@@ -298,9 +312,9 @@ exports.createArticle = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Title and Category are required' });
     }
 
-    const isAdmin = req.user?.role === 'admin';
-    // Officer submissions default to published if specified or pending_review
-    const initialStatus = status || (isAdmin ? 'published' : 'pending_review');
+    // Only users who can publish may choose the status; everyone else's articles go to review.
+    const canPublish = await userHasPermission(req.user.id, 'knowledge.publish');
+    const initialStatus = canPublish ? (['published', 'pending_review', 'draft'].includes(status) ? status : 'published') : 'pending_review';
 
     // Build synthesized markdown content if not explicitly provided
     const resolvedContent = content || `
@@ -364,9 +378,11 @@ ${escalation || 'Escalate to Tier 3 Lead if unresolved after standard procedure.
       });
     });
 
+    if (initialStatus === 'pending_review') await alertReviewers(article, req.user);
+
     res.status(201).json({
       success: true,
-      message: initialStatus === 'pending_review' 
+      message: initialStatus === 'pending_review'
         ? 'Article submitted successfully and queued for Administrator review.' 
         : 'Article published successfully.',
       article: serializeArticle(article)
@@ -380,12 +396,6 @@ ${escalation || 'Escalate to Tier 3 Lead if unresolved after standard procedure.
 // ── 4. UPDATE ARTICLE (Strictly Administrator Only) ───────────
 exports.updateArticle = async (req, res) => {
   try {
-    if (req.user?.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        message: 'Permission denied. Only ICT Administrators can edit knowledge articles.'
-      });
-    }
 
     const { id } = req.params;
     const existing = await prisma.knowledgeArticle.findUnique({ where: { id } });
@@ -460,12 +470,6 @@ exports.updateArticle = async (req, res) => {
 // ── 5. DELETE ARTICLE (Soft Delete - Admin Only) ──────────────
 exports.deleteArticle = async (req, res) => {
   try {
-    if (req.user?.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        message: 'Permission denied. Only ICT Administrators can delete knowledge articles.'
-      });
-    }
 
     const { id } = req.params;
     const existing = await prisma.knowledgeArticle.findUnique({ where: { id } });
@@ -493,9 +497,6 @@ exports.deleteArticle = async (req, res) => {
 // ── 6. RESTORE ARTICLE (Admin Only) ──────────────────────────
 exports.restoreArticle = async (req, res) => {
   try {
-    if (req.user?.role !== 'admin') {
-      return res.status(403).json({ success: false, message: 'Permission denied.' });
-    }
 
     const { id } = req.params;
     await prisma.knowledgeArticle.update({
@@ -520,9 +521,6 @@ exports.restoreArticle = async (req, res) => {
 // ── 7. APPROVE OFFICER SUBMISSION (Admin Only) ───────────────
 exports.approveArticle = async (req, res) => {
   try {
-    if (req.user?.role !== 'admin') {
-      return res.status(403).json({ success: false, message: 'Permission denied.' });
-    }
 
     const { id } = req.params;
     await prisma.knowledgeArticle.update({
@@ -682,7 +680,7 @@ exports.uploadArticleMaterial = async (req, res) => {
             storageKey: req.file.filename,
             uploadedAt: new Date()
           }],
-          status: req.user?.role === 'admin' ? 'published' : 'pending_review',
+          status: (await userHasPermission(req.user.id, 'knowledge.publish')) ? 'published' : 'pending_review',
           authorId: req.user?.id || null,
           authorName: req.user?.name || 'ICT Officer',
           authorRole: req.user?.role || 'staff'
@@ -695,6 +693,7 @@ exports.uploadArticleMaterial = async (req, res) => {
       });
     });
     uploadedPath = null;
+    if (article.status === 'pending_review') await alertReviewers(article, req.user);
 
     res.status(201).json({ success: true, article: serializeArticle(article), message: 'Material uploaded and indexed successfully.' });
   } catch (error) {
@@ -910,5 +909,89 @@ exports.getTicketSuggestions = async (req, res) => {
   } catch (error) {
     console.error('Ticket suggestions error:', error);
     res.status(500).json({ success: false, message: 'Failed to generate ticket suggestions' });
+  }
+};
+
+// ── In-app preview of uploaded material (no download needed) ──
+// PDFs and images are streamed inline after checking the file's real signature (the
+// browser-declared type is not trusted); text files are returned as text; Word .docx is
+// converted to HTML (rendered by the client in a sandboxed frame with scripts disabled).
+const PREVIEW_TEXT_EXTENSIONS = new Set(['txt', 'md', 'csv', 'json', 'log']);
+const PREVIEW_MAX_TEXT_BYTES = 1024 * 1024;
+
+function detectBinaryType(buffer) {
+  if (buffer.length >= 4 && buffer.subarray(0, 4).toString('latin1') === '%PDF') return 'application/pdf';
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString('latin1') === 'RIFF' && buffer.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  if (buffer.length >= 4 && buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) return 'application/zip';
+  return null;
+}
+
+async function readHead(filePath, bytes) {
+  const handle = await fs.promises.open(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(bytes);
+    const { bytesRead } = await handle.read(buffer, 0, bytes, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
+exports.previewArticleMaterial = async (req, res) => {
+  try {
+    const { id, storageKey } = req.params;
+    if (!/^kb-[0-9a-f-]{36}$/i.test(storageKey)) {
+      return res.status(404).json({ success: false, message: 'Material not found' });
+    }
+    const article = await prisma.knowledgeArticle.findUnique({ where: { id }, select: { attachments: true } });
+    const attachment = Array.isArray(article?.attachments)
+      ? article.attachments.find(item => item.storageKey === storageKey)
+      : null;
+    const filePath = attachment && resolveUploadPath(path.join(uploadDir, storageKey));
+    if (!filePath || !fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, message: 'Material not found' });
+    }
+
+    const extension = path.extname(String(attachment.name || '')).slice(1).toLowerCase();
+    const detected = detectBinaryType(await readHead(filePath, 16));
+
+    if (PREVIEW_TEXT_EXTENSIONS.has(extension) && !detected) {
+      const head = await readHead(filePath, PREVIEW_MAX_TEXT_BYTES + 1);
+      return res.json({
+        success: true,
+        kind: 'text',
+        format: extension,
+        text: head.subarray(0, PREVIEW_MAX_TEXT_BYTES).toString('utf8'),
+        truncated: head.length > PREVIEW_MAX_TEXT_BYTES
+      });
+    }
+
+    if (extension === 'docx' && detected === 'application/zip') {
+      const mammoth = require('mammoth');
+      const result = await mammoth.convertToHtml({ path: filePath });
+      return res.json({ success: true, kind: 'html', html: result.value });
+    }
+
+    const expectedByExtension = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
+    if (expectedByExtension[extension] && detected === expectedByExtension[extension]) {
+      const filename = path.basename(String(attachment.name || 'material')).replace(/[^\w.\- ]/g, '_');
+      res.setHeader('Content-Type', detected);
+      res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+      res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
+      return res.sendFile(filePath);
+    }
+
+    return res.status(415).json({
+      success: false,
+      kind: 'unsupported',
+      message: extension === 'doc'
+        ? 'Preview is not available for old Word (.doc) files. Save it as .docx or PDF to preview it.'
+        : 'Preview is not available for this file type.'
+    });
+  } catch (error) {
+    console.error('Knowledge material preview failed:', { requestId: req.id, message: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to preview material' });
   }
 };

@@ -27,7 +27,7 @@ const generateToken = (user) => {
 // Pre-computed hash used to equalise response time for unknown usernames,
 // so login timing does not reveal which accounts exist.
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync('timing-equaliser-not-a-real-password', 10);
-const STAFF_ROLES = new Set(['staff', 'admin']);
+const { getPermissionsForUser } = require('../services/accessControlService');
 
 // Login with username and password (AD/LDAP Authentication)
 exports.login = async (req, res) => {
@@ -106,12 +106,14 @@ exports.login = async (req, res) => {
 
     }
 
-    // This is an ICT staff console: requester accounts cannot sign in (mirrors the AD path).
-    if (!STAFF_ROLES.has(user.role)) {
+    // This is an ICT console: only accounts holding a role with at least one permission
+    // (Administrator, ICT Manager, ICT Officer, Viewer or a custom role) can sign in.
+    const permissions = await getPermissionsForUser(user.id);
+    if (!permissions.length) {
       auditLog('auth.denied_non_staff', { requestId: req.id, username: user.username });
       return res.status(403).json({
         success: false,
-        message: 'Access denied. Only ICT staff and administrators can access this system.'
+        message: 'Access denied. Your account has no role in the ICT service desk. Contact an administrator.'
       });
     }
 

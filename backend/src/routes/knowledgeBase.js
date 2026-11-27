@@ -3,7 +3,7 @@ const router = express.Router();
 const crypto = require('crypto');
 const multer = require('multer');
 const knowledgeBaseController = require('../controllers/knowledgeBaseController');
-const { authenticateToken, requireAdmin, requireStaffOrAdmin } = require('../middleware/auth');
+const { authenticateToken, requirePermission } = require('../middleware/auth');
 const { uploadDir } = require('../services/uploadStorage');
 const { rateLimit } = require('../middleware/security');
 
@@ -50,17 +50,21 @@ router.post('/articles/:id/feedback', feedbackLimit, knowledgeBaseController.sub
 
 // ── PROTECTED OFFICER & ADMIN WORKBENCH ───────────────────────
 router.use(authenticateToken);
-router.use(requireStaffOrAdmin);
+const canRead = requirePermission('tickets.view', 'knowledge.contribute', 'knowledge.publish');
+const canContribute = requirePermission('knowledge.contribute', 'knowledge.publish');
+const canPublish = requirePermission('knowledge.publish');
+router.use(canRead);
 
 // Search & Read
 router.get('/articles', knowledgeBaseController.getArticles);
 router.get('/articles/:idOrSlug', knowledgeBaseController.getArticle);
 router.get('/articles/:id/revisions', knowledgeBaseController.getRevisions);
 router.get('/articles/:id/attachments/:storageKey', knowledgeBaseController.downloadArticleMaterial);
+router.get('/articles/:id/attachments/:storageKey/preview', knowledgeBaseController.previewArticleMaterial);
 
 // Officer Contributions
-router.post('/articles', knowledgeBaseController.createArticle);
-router.post('/materials/upload', upload.single('file'), knowledgeBaseController.uploadArticleMaterial);
+router.post('/articles', canContribute, knowledgeBaseController.createArticle);
+router.post('/materials/upload', canContribute, upload.single('file'), knowledgeBaseController.uploadArticleMaterial);
 
 // Insights & Ticket Contextual Deflection
 router.get('/insights', knowledgeBaseController.getKnowledgeInsights);
@@ -69,10 +73,10 @@ router.post('/articles/:id/rate', knowledgeBaseController.rateArticle);
 
 // ── STRICTLY ADMINISTRATOR ONLY (Requirement 3) ───────────────
 // Only admins can edit, approve, delete, or restore articles
-router.put('/articles/:id', requireAdmin, knowledgeBaseController.updateArticle);
-router.delete('/articles/:id', requireAdmin, knowledgeBaseController.deleteArticle);
-router.post('/articles/:id/restore', requireAdmin, knowledgeBaseController.restoreArticle);
-router.post('/articles/:id/approve', requireAdmin, knowledgeBaseController.approveArticle);
-router.get('/analytics/search-gaps', requireAdmin, knowledgeBaseController.getSearchGaps);
+router.put('/articles/:id', canPublish, knowledgeBaseController.updateArticle);
+router.delete('/articles/:id', canPublish, knowledgeBaseController.deleteArticle);
+router.post('/articles/:id/restore', canPublish, knowledgeBaseController.restoreArticle);
+router.post('/articles/:id/approve', canPublish, knowledgeBaseController.approveArticle);
+router.get('/analytics/search-gaps', canPublish, knowledgeBaseController.getSearchGaps);
 
 module.exports = router;

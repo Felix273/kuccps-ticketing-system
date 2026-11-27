@@ -106,6 +106,9 @@ const sidebars = {
       type: 'category',
       label: 'Operations',
       items: [
+        'operations/ticket-lifecycle',
+        'operations/team-action-items',
+        'operations/roles-and-settings',
         'operations/maintenance',
         'operations/backup',
         'operations/monitoring',
